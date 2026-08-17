@@ -1,0 +1,48 @@
+{
+  "schemaVersion": 1,
+  "id": "io.github.d3vw.sinbar",
+  "name": "Sinbar",
+  "version": "0.1.0",
+  "author": "d3vw",
+  "license": "MIT",
+  "description": "A keyboard-first sing-box tray monitor and outbound switcher for the Omarchy bar.",
+  "kinds": ["bar-widget"],
+  "entryPoints": {
+    "barWidget": "Panel.qml"
+  },
+  "barWidget": {
+    "displayName": "Sinbar",
+    "description": "Monitor sing-box traffic, switch outbounds, inspect connections, and read logs.",
+    "category": "Network",
+    "allowMultiple": false,
+    "defaultSection": "right",
+    "defaults": {
+      "configPath": "~/.config/lazy-box/config.toml",
+      "showSpeeds": "On",
+      "tuiCommand": "lazy-box"
+    },
+    "schema": [
+      {
+        "key": "configPath",
+        "type": "string",
+        "label": "lazy-box config path",
+        "defaultValue": "~/.config/lazy-box/config.toml",
+        "description": "TOML file containing host, port, secret, TLS, and interval_ms."
+      },
+      {
+        "key": "showSpeeds",
+        "type": "enum",
+        "label": "Show live speeds in bar",
+        "options": ["On", "Off"],
+        "defaultValue": "On"
+      },
+      {
+        "key": "tuiCommand",
+        "type": "string",
+        "label": "TUI command",
+        "defaultValue": "lazy-box",
+        "description": "Command opened in a terminal with a right click."
+      }
+    ]
+  }
+}
