@@ -36,6 +36,17 @@ tls = false
 interval_ms = 1000
 ```
 
+| Field | Meaning |
+|---|---|
+| `host` / `port` | Address sing-box's `StartedService` gRPC API listens on |
+| `secret` | Auth secret for that API, if you configured one |
+| `tls` | Whether the gRPC connection should use TLS |
+| `interval_ms` | How often the bridge polls for status updates |
+
+These must match whatever you configured in sing-box, not the other way around. If the file
+doesn't exist, Sinbar falls back to `127.0.0.1:9999`, no secret, and a 1000ms interval — only
+create the file if you need different values.
+
 The bar settings expose:
 
 - **Config path** — defaults to `~/.config/sinbar/config.toml`
