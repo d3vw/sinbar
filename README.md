@@ -1,6 +1,6 @@
 # Sinbar
 
-A keyboard-first sing-box tray plugin for the Omarchy Quattro bar. It surfaces live traffic, outbound groups, active connections, logs, and Clash mode switching in a compact bar panel, with an optional right-click shortcut to your own terminal TUI.
+A keyboard-first [sing-box](https://sing-box.sagernet.org) tray plugin for the Omarchy Quattro bar. It surfaces live traffic, outbound groups, active connections, logs, and Clash mode switching in a compact bar panel, with an optional right-click shortcut to your own terminal TUI.
 
 ## Features
 
@@ -18,7 +18,7 @@ Sinbar talks to the sing-box `StartedService` gRPC API through a small Go bridge
 ## Requirements
 
 - Omarchy Quattro shell
-- sing-box with the `StartedService` gRPC API enabled
+- [sing-box](https://sing-box.sagernet.org) with the `StartedService` gRPC API enabled
 - Go 1.25 or newer to build the bridge
 - A Nerd Font for the intended icons
 - Optional: a terminal TUI command on `PATH` for the right-click action (configurable, disabled by default)
