@@ -81,11 +81,13 @@ To build without installing:
 make check
 ```
 
-To remove the local installation:
+## Uninstall
 
 ```sh
-make uninstall-local
+omarchy plugin remove io.github.d3vw.sinbar
 ```
+
+From a local checkout, `make uninstall-local` runs the same command.
 
 ## Controls
 
