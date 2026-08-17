@@ -62,7 +62,7 @@ func (c *Client) runStatusStream() {
 	c.withRetry(func() error {
 		stream, err := c.svc.SubscribeStatus(c.ctx, &daemon.SubscribeStatusRequest{
 			// The StartedService protobuf carries a Go time.Duration in
-			// nanoseconds, while lazy-box config exposes milliseconds.
+			// nanoseconds, while the config file exposes milliseconds.
 			Interval: int64(time.Duration(c.cfg.IntervalMs) * time.Millisecond),
 		})
 		if err != nil {

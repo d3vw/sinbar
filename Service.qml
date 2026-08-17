@@ -40,7 +40,7 @@ Item {
   readonly property bool busy: actionProcess.running
 
   readonly property string homeDir: Quickshell.env("HOME") || ""
-  readonly property string configPath: expandHome(setting("configPath", "~/.config/lazy-box/config.toml"))
+  readonly property string configPath: expandHome(setting("configPath", "~/.config/sinbar/config.toml"))
   readonly property string bridgePath: localPath(Qt.resolvedUrl("bin/sinbar-bridge"))
 
   function setting(name, fallback) {

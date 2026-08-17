@@ -28,7 +28,7 @@ Panel {
   readonly property color accent: Color.accent
   readonly property string fontFamily: bar ? bar.fontFamily : Style.font.family
   readonly property bool showSpeeds: String(setting("showSpeeds", "On")) === "On"
-  readonly property string tuiCommand: String(setting("tuiCommand", "lazy-box"))
+  readonly property string tuiCommand: String(setting("tuiCommand", ""))
   readonly property var selectableGroups: proxy && proxy.groups ? filteredGroups() : []
   readonly property var filteredLogs: proxy && proxy.logs ? computeFilteredLogs() : []
   readonly property var currentGroup: arrayLength(selectableGroups) > 0

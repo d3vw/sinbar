@@ -40,13 +40,13 @@ func LoadFrom(path string) (*Config, error) {
 	return cfg, nil
 }
 
-// DefaultPath returns ~/.config/lazy-box/config.toml.
+// DefaultPath returns ~/.config/sinbar/config.toml.
 func DefaultPath() string {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		home = "."
 	}
-	return filepath.Join(home, ".config", "lazy-box", "config.toml")
+	return filepath.Join(home, ".config", "sinbar", "config.toml")
 }
 
 // Load reads from DefaultPath().

@@ -17,16 +17,16 @@
     "allowMultiple": false,
     "defaultSection": "right",
     "defaults": {
-      "configPath": "~/.config/lazy-box/config.toml",
+      "configPath": "~/.config/sinbar/config.toml",
       "showSpeeds": "On",
-      "tuiCommand": "lazy-box"
+      "tuiCommand": ""
     },
     "schema": [
       {
         "key": "configPath",
         "type": "string",
-        "label": "lazy-box config path",
-        "defaultValue": "~/.config/lazy-box/config.toml",
+        "label": "Config path",
+        "defaultValue": "~/.config/sinbar/config.toml",
         "description": "TOML file containing host, port, secret, TLS, and interval_ms."
       },
       {
@@ -40,8 +40,8 @@
         "key": "tuiCommand",
         "type": "string",
         "label": "TUI command",
-        "defaultValue": "lazy-box",
-        "description": "Command opened in a terminal with a right click."
+        "defaultValue": "",
+        "description": "Optional command opened in a terminal with a right click. Leave blank to disable."
       }
     ]
   }

@@ -66,7 +66,7 @@ type compactConnection struct {
 func main() {
 	flags := flag.NewFlagSet("sinbar-bridge", flag.ContinueOnError)
 	flags.SetOutput(os.Stderr)
-	configPath := flags.String("config", config.DefaultPath(), "path to lazy-box config.toml")
+	configPath := flags.String("config", config.DefaultPath(), "path to sinbar config.toml")
 	host := flags.String("host", "", "sing-box API host override")
 	port := flags.Int("port", 0, "sing-box API port override")
 	secret := flags.String("secret", "", "sing-box API secret override")

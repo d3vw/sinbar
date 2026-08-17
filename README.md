@@ -1,6 +1,6 @@
 # Sinbar
 
-A keyboard-first sing-box tray plugin for the Omarchy Quattro bar. It brings the useful parts of `lazy-box`—live traffic, outbound groups, active connections, logs, and Clash mode switching—into a compact bar panel while keeping the full TUI one right-click away.
+A keyboard-first sing-box tray plugin for the Omarchy Quattro bar. It surfaces live traffic, outbound groups, active connections, logs, and Clash mode switching in a compact bar panel, with an optional right-click shortcut to your own terminal TUI.
 
 ## Features
 
@@ -11,9 +11,9 @@ A keyboard-first sing-box tray plugin for the Omarchy Quattro bar. It brings the
 - Inspect and close active connections
 - Follow, filter, and clear sing-box logs, with sing-box's own log colors rendered instead of raw ANSI codes
 - Mouse controls and TUI-style keyboard navigation
-- Right-click the bar item to open `lazy-box` in the configured terminal
+- Right-click the bar item to open a configurable TUI command in the terminal
 
-Sinbar talks to the sing-box `StartedService` gRPC API through a small Go bridge. The bridge is based on the client and protobuf contract from `lazy-box`; QML never receives the API secret.
+Sinbar talks to the sing-box `StartedService` gRPC API through a small Go bridge. QML never receives the API secret.
 
 ## Requirements
 
@@ -21,14 +21,14 @@ Sinbar talks to the sing-box `StartedService` gRPC API through a small Go bridge
 - sing-box with the `StartedService` gRPC API enabled
 - Go 1.25 or newer to build the bridge
 - A Nerd Font for the intended icons
-- Optional: `lazy-box` on `PATH` for the right-click TUI action
+- Optional: a terminal TUI command on `PATH` for the right-click action (configurable, disabled by default)
 
 ## Configuration
 
-Sinbar reads the same config as `lazy-box` by default:
+Sinbar reads its config from:
 
 ```toml
-# ~/.config/lazy-box/config.toml
+# ~/.config/sinbar/config.toml
 host = "127.0.0.1"
 port = 9999
 secret = "your-api-secret"
@@ -38,14 +38,14 @@ interval_ms = 1000
 
 The bar settings expose:
 
-- **lazy-box config path** — defaults to `~/.config/lazy-box/config.toml`
+- **Config path** — defaults to `~/.config/sinbar/config.toml`
 - **Show live speeds in bar** — `On` or `Off`
-- **TUI command** — defaults to `lazy-box`
+- **TUI command** — empty by default; set it to any terminal TUI you want the right-click action to open
 
 Keep the config file user-readable only when it contains a secret:
 
 ```sh
-chmod 600 ~/.config/lazy-box/config.toml
+chmod 600 ~/.config/sinbar/config.toml
 ```
 
 ## Build and install locally
@@ -79,7 +79,7 @@ make uninstall-local
 | Input | Action |
 |---|---|
 | Left click | Open or close panel |
-| Right click | Open the full `lazy-box` TUI |
+| Right click | Open the configured TUI command |
 | Middle click | Restart the API bridge |
 | `1` / `2` / `3` | Routes / Connections / Logs |
 | `h` / `l` | Previous / next tab |
@@ -104,7 +104,7 @@ Panel.qml              Bar item and keyboard-driven popup
 Service.qml            Bridge process, stream state, and actions
 Model.js                Formatting helpers
 cmd/sinbar-bridge/      JSON-lines gRPC bridge
-client/                 API client derived from lazy-box
+client/                 sing-box StartedService API client
 daemon/                 Generated StartedService protobuf bindings
 ```
 

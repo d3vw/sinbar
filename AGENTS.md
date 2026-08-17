@@ -2,13 +2,13 @@
 
 ## Project Scope
 
-Sinbar is an Omarchy Quattro bar plugin that monitors and controls sing-box through the `StartedService` gRPC API. It reuses the configuration and behavior of `lazy-box` where practical.
+Sinbar is an Omarchy Quattro bar plugin that monitors and controls sing-box through the `StartedService` gRPC API.
 
 ## Architecture
 
 - Keep the bar widget and panel UI in QML.
 - Use the Go JSON-lines bridge for all gRPC communication.
-- Read connection settings from `~/.config/lazy-box/config.toml` by default.
+- Read connection settings from `~/.config/sinbar/config.toml` by default.
 - Never expose the API secret in QML state, logs, command-line arguments, or screenshots.
 - Keep high-frequency connection and log streams active only while the panel is open.
 
