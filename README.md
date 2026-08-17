@@ -48,7 +48,20 @@ Keep the config file user-readable only when it contains a secret:
 chmod 600 ~/.config/sinbar/config.toml
 ```
 
-## Build and install locally
+## Install
+
+### Via the plugin marketplace / `omarchy plugin add`
+
+```sh
+omarchy plugin add https://github.com/d3vw/sinbar.git --enable
+```
+
+This just clones the repo and enables the widget — no separate build step. The Go bridge
+(`bin/sinbar-bridge`) is built automatically from source the first time the plugin starts,
+so a Go toolchain must be on `PATH`. Startup takes a few extra seconds on that first run
+while it compiles; after that the built binary is reused.
+
+### From a local checkout
 
 ```sh
 make install-local

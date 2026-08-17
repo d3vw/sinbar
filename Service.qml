@@ -41,6 +41,7 @@ Item {
 
   readonly property string homeDir: Quickshell.env("HOME") || ""
   readonly property string configPath: expandHome(setting("configPath", "~/.config/sinbar/config.toml"))
+  readonly property string pluginDir: localPath(Qt.resolvedUrl("."))
   readonly property string bridgePath: localPath(Qt.resolvedUrl("bin/sinbar-bridge"))
 
   function setting(name, fallback) {
@@ -61,8 +62,19 @@ Item {
     try { return decodeURIComponent(value) } catch (e) { return value }
   }
 
+  function shQuote(value) {
+    return "'" + String(value).replace(/'/g, "'\\''") + "'"
+  }
+
+  // omarchy plugin add only git-clones the repo; it never builds anything.
+  // Build the bridge from source on first run when it hasn't been staged
+  // by `make install-local` yet.
   function bridgeCommand(args) {
-    return [bridgePath, "--config", configPath].concat(args)
+    var ensureBuilt = "test -x " + shQuote(bridgePath) +
+      " || (cd " + shQuote(pluginDir) + " && go build -trimpath -ldflags='-s -w' -o " +
+      shQuote(bridgePath) + " ./cmd/sinbar-bridge)"
+    var script = ensureBuilt + " && exec " + shQuote(bridgePath) + " \"$@\""
+    return ["sh", "-c", script, "sinbar-bridge", "--config", configPath].concat(args)
   }
 
   function restart() {

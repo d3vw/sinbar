@@ -27,6 +27,9 @@ Sinbar is an Omarchy Quattro bar plugin that monitors and controls sing-box thro
 - Install the user plugin under `~/.config/omarchy/plugins/io.github.d3vw.sinbar/`.
 - Use `make install-local` for local installation.
 - Keep bridge installation atomic to avoid `Text file busy` errors.
+- `omarchy plugin add` only git-clones the repo; it never runs a build step. Service.qml's
+  `bridgeCommand()` must keep the `test -x ... || go build ...` fallback so a bare clone can
+  still self-build `bin/sinbar-bridge` on first run.
 
 ## Development Workflow
 
