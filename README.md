@@ -150,4 +150,4 @@ qs log -p "$OMARCHY_PATH/shell" --tail 100
 
 ## Security
 
-Omarchy plugins execute unsandboxed inside the long-running shell process. Sinbar starts only its bundled bridge and explicit user actions. It does not use `sudo`, install hooks, or remote downloads. The bridge reads the configured secret directly from the TOML file and does not place it in process arguments or QML state.
+Omarchy plugins execute unsandboxed inside the long-running shell process. Sinbar starts only its bundled bridge and explicit user actions, with no elevated privileges, install hooks, or remote downloads. The bridge reads the configured secret directly from the TOML file and does not place it in process arguments or QML state.
