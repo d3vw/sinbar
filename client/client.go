@@ -5,6 +5,11 @@ import (
 	"context"
 	"crypto/tls"
 	"fmt"
+	"io"
+	"os"
+	"path/filepath"
+	"strings"
+	"time"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
@@ -29,6 +34,8 @@ type Client struct {
 	Connections chan ConnectionsUpdate
 	Logs        chan LogUpdate
 	Service     chan ServiceStatusUpdate
+	Tailscale   chan TailscaleStatusUpdate
+	Taildrop    chan TaildropInboxUpdate
 
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -43,6 +50,8 @@ func New(cfg *config.Config) *Client {
 		Connections: make(chan ConnectionsUpdate, 100),
 		Logs:        make(chan LogUpdate, 100),
 		Service:     make(chan ServiceStatusUpdate, 4),
+		Tailscale:   make(chan TailscaleStatusUpdate, 1),
+		Taildrop:    make(chan TaildropInboxUpdate, 1),
 		ctx:         ctx,
 		cancel:      cancel,
 	}
@@ -173,6 +182,200 @@ func (c *Client) SetGroupExpand(ctx context.Context, groupTag string, isExpand b
 	})
 	if err != nil {
 		return fmt.Errorf("set group expand: %w", err)
+	}
+	return nil
+}
+
+func (c *Client) SetTailscaleExitNode(ctx context.Context, endpointTag, stableID string) error {
+	_, err := c.svc.SetTailscaleExitNode(ctx, &daemon.SetTailscaleExitNodeRequest{EndpointTag: endpointTag, StableID: stableID})
+	if err != nil {
+		return fmt.Errorf("set tailscale exit node: %w", err)
+	}
+	return nil
+}
+
+func (c *Client) SendTaildropFiles(ctx context.Context, endpointTag, peerID string, paths []string) error {
+	manifest := make([]*daemon.TaildropOutgoingFile, 0, len(paths))
+	for _, path := range paths {
+		info, err := os.Stat(path)
+		if err != nil {
+			return fmt.Errorf("open taildrop file: %w", err)
+		}
+		if info.IsDir() {
+			return fmt.Errorf("directories are not supported: %s", path)
+		}
+		manifest = append(manifest, &daemon.TaildropOutgoingFile{Name: filepath.Base(path), Size: info.Size()})
+	}
+	stream, err := c.svc.SendTaildropFiles(ctx)
+	if err != nil {
+		return fmt.Errorf("start taildrop: %w", err)
+	}
+	if err = stream.Send(&daemon.TaildropSendClientMessage{Message: &daemon.TaildropSendClientMessage_Start{Start: &daemon.TaildropSendStart{EndpointTag: endpointTag, PeerStableID: peerID, Files: manifest}}}); err != nil {
+		return fmt.Errorf("start taildrop upload: %w", err)
+	}
+	// Keep messages below gRPC's transport frame boundary, matching sing-box.
+	buffer := make([]byte, 16*1024-64)
+	for _, path := range paths {
+		file, openErr := os.Open(path)
+		if openErr != nil {
+			return openErr
+		}
+		for {
+			n, readErr := file.Read(buffer)
+			if n > 0 {
+				if err = stream.Send(&daemon.TaildropSendClientMessage{Message: &daemon.TaildropSendClientMessage_Chunk{Chunk: &daemon.TaildropFileChunk{Data: buffer[:n]}}}); err != nil {
+					file.Close()
+					return fmt.Errorf("send taildrop data: %w", err)
+				}
+			}
+			if readErr == io.EOF {
+				break
+			}
+			if readErr != nil {
+				file.Close()
+				return readErr
+			}
+		}
+		file.Close()
+		if err = stream.Send(&daemon.TaildropSendClientMessage{Message: &daemon.TaildropSendClientMessage_FileDone{FileDone: &daemon.TaildropFileDone{}}}); err != nil {
+			return err
+		}
+	}
+	if err = stream.CloseSend(); err != nil {
+		return err
+	}
+	for {
+		_, err = stream.Recv()
+		if err == io.EOF {
+			return nil
+		}
+		if err != nil {
+			return fmt.Errorf("finish taildrop: %w", err)
+		}
+	}
+}
+
+// DownloadTaildropFile writes one waiting inbox file into dir under a name that
+// does not collide with anything already there, and reports the path it landed
+// on. The file stays in the inbox; removing it is a separate
+// DeleteTaildropFile call.
+func (c *Client) DownloadTaildropFile(ctx context.Context, endpointTag, name, dir string) (string, error) {
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return "", fmt.Errorf("create download directory: %w", err)
+	}
+	path := uniquePath(dir, name)
+	if err := c.downloadTaildropFileTo(ctx, endpointTag, name, path); err != nil {
+		return "", err
+	}
+	return path, nil
+}
+
+// PreviewTaildropFile writes one waiting inbox file into dir under its own
+// name, replacing whatever an earlier preview of the same name left there, and
+// reports the path. Unlike a save this keeps no history and does not touch the
+// inbox: looking at a file must not consume it.
+func (c *Client) PreviewTaildropFile(ctx context.Context, endpointTag, name, dir string) (string, error) {
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return "", fmt.Errorf("create preview directory: %w", err)
+	}
+	path := filepath.Join(dir, safeBase(name))
+	if err := c.downloadTaildropFileTo(ctx, endpointTag, name, path); err != nil {
+		return "", err
+	}
+	return path, nil
+}
+
+func (c *Client) downloadTaildropFileTo(ctx context.Context, endpointTag, name, path string) error {
+	stream, err := c.svc.DownloadTaildropFile(ctx, &daemon.DownloadTaildropFileRequest{EndpointTag: endpointTag, Name: name})
+	if err != nil {
+		return fmt.Errorf("download taildrop file: %w", err)
+	}
+	// Collect into a .part sibling and rename only once the stream ends
+	// cleanly, so an interrupted transfer never leaves a truncated file
+	// looking complete — nor replaces a good earlier copy with one.
+	partPath := path + ".part"
+	file, err := os.OpenFile(partPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
+	if err != nil {
+		return err
+	}
+	abandon := func(cause error) error {
+		file.Close()
+		os.Remove(partPath)
+		return cause
+	}
+	for {
+		chunk, recvErr := stream.Recv()
+		if recvErr == io.EOF {
+			break
+		}
+		if recvErr != nil {
+			return abandon(fmt.Errorf("download taildrop file: %w", recvErr))
+		}
+		if len(chunk.Data) == 0 {
+			continue
+		}
+		if _, err = file.Write(chunk.Data); err != nil {
+			return abandon(err)
+		}
+	}
+	if err = file.Close(); err != nil {
+		os.Remove(partPath)
+		return err
+	}
+	if err = os.Rename(partPath, path); err != nil {
+		os.Remove(partPath)
+		return err
+	}
+	return nil
+}
+
+func (c *Client) DeleteTaildropFile(ctx context.Context, endpointTag, name string) error {
+	_, err := c.svc.DeleteTaildropFile(ctx, &daemon.DeleteTaildropFileRequest{EndpointTag: endpointTag, Name: name})
+	if err != nil {
+		return fmt.Errorf("delete taildrop file: %w", err)
+	}
+	return nil
+}
+
+// safeBase reduces a peer-supplied file name to a single path element. The name
+// arrives over the network, so a sender must not be able to steer a write
+// outside the destination directory with something like "../../.bashrc".
+func safeBase(name string) string {
+	base := filepath.Base(filepath.FromSlash(name))
+	if base == "." || base == ".." || base == string(filepath.Separator) || base == "" {
+		return "taildrop-file"
+	}
+	return base
+}
+
+// uniquePath resolves name against dir without clobbering an existing file,
+// inserting " (n)" before the extension the way file managers do.
+func uniquePath(dir, name string) string {
+	base := safeBase(name)
+	candidate := filepath.Join(dir, base)
+	if _, err := os.Stat(candidate); os.IsNotExist(err) {
+		return candidate
+	}
+	ext := filepath.Ext(base)
+	stem := strings.TrimSuffix(base, ext)
+	// filepath.Ext(".bashrc") is the whole name, which would leave an empty
+	// stem and rename to " (1).bashrc". A dotfile has no extension to split.
+	if stem == "" {
+		stem, ext = base, ""
+	}
+	for n := 1; n < 1000; n++ {
+		candidate = filepath.Join(dir, fmt.Sprintf("%s (%d)%s", stem, n, ext))
+		if _, err := os.Stat(candidate); os.IsNotExist(err) {
+			return candidate
+		}
+	}
+	return filepath.Join(dir, fmt.Sprintf("%s-%d%s", stem, time.Now().UnixNano(), ext))
+}
+
+func (c *Client) TailscaleLogout(ctx context.Context, endpointTag string) error {
+	_, err := c.svc.TailscaleLogout(ctx, &daemon.TailscaleLogoutRequest{EndpointTag: endpointTag})
+	if err != nil {
+		return fmt.Errorf("tailscale logout: %w", err)
 	}
 	return nil
 }

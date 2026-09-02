@@ -5,14 +5,14 @@
   "version": "0.1.0",
   "author": "d3vw",
   "license": "MIT",
-  "description": "A keyboard-first sing-box tray monitor and outbound switcher for the Omarchy bar.",
+  "description": "A keyboard-first sing-box monitor with outbound and Tailscale controls for the Omarchy bar.",
   "kinds": ["bar-widget"],
   "entryPoints": {
     "barWidget": "Panel.qml"
   },
   "barWidget": {
     "displayName": "Sinbar",
-    "description": "Monitor sing-box traffic, switch outbounds, inspect connections, and read logs.",
+    "description": "Monitor sing-box traffic, switch outbounds, inspect Tailscale peers, connections, and logs.",
     "category": "Network",
     "allowMultiple": false,
     "defaultSection": "right",

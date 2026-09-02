@@ -41,6 +41,32 @@ function uptime(startedAt) {
   return minutes + "m"
 }
 
+function relativeTime(millis) {
+  var value = Number(millis) || 0
+  if (value <= 0) return ""
+  // sing-box reports epoch milliseconds; tolerate a seconds-based value.
+  if (value < 100000000000) value *= 1000
+  var seconds = Math.floor((Date.now() - value) / 1000)
+  if (seconds < 0) return ""
+  if (seconds < 60) return "just now"
+  var minutes = Math.floor(seconds / 60)
+  if (minutes < 60) return minutes + "m ago"
+  var hours = Math.floor(minutes / 60)
+  if (hours < 24) return hours + "h ago"
+  return Math.floor(hours / 24) + "d ago"
+}
+
+function taildropSubtitle(file) {
+  if (!file) return ""
+  var parts = []
+  var sender = String(file.senderName || "")
+  if (sender !== "") parts.push(sender)
+  parts.push(formatBytes(file.size))
+  var age = relativeTime(file.modifiedAt)
+  if (age !== "") parts.push(age)
+  return parts.join("  ·  ")
+}
+
 function shortProcess(path) {
   var value = String(path || "")
   if (value === "") return "unknown process"

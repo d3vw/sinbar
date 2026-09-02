@@ -50,6 +50,12 @@ type connectionEvent struct {
 	DownlinkDelta int64
 }
 
+// savedFile is the "result" payload of taildrop-save: QML shows the basename,
+// which is the only place the collision-avoiding rename becomes visible.
+type savedFile struct {
+	Path string `json:"path"`
+}
+
 type compactConnection struct {
 	ID            string
 	Network       string
@@ -100,10 +106,11 @@ func main() {
 		watchDetails(api)
 		return
 	}
-	if err := runAction(api, args); err != nil {
+	data, err := runAction(api, args)
+	if err != nil {
 		fatalJSON(err)
 	}
-	_ = json.NewEncoder(os.Stdout).Encode(event{Type: "result", OK: true})
+	_ = json.NewEncoder(os.Stdout).Encode(event{Type: "result", OK: true, Data: data})
 }
 
 func loadConfig(path string) (*config.Config, error) {
@@ -145,6 +152,8 @@ func watch(api *client.Client) {
 			emit("status", update)
 		case update := <-api.Groups:
 			emit("groups", update)
+		case update := <-api.Tailscale:
+			emit("tailscale", update)
 		}
 	}
 }
@@ -155,6 +164,10 @@ func watchDetails(api *client.Client) {
 	encoder := json.NewEncoder(os.Stdout)
 	flushTicker := time.NewTicker(750 * time.Millisecond)
 	defer flushTicker.Stop()
+
+	// The Taildrop inbox rides the detail stream rather than the always-on
+	// watch, because it also carries in-flight receive progress.
+	api.StartTaildropInbox()
 
 	var pendingConnections []client.ConnectionEvent
 	connectionsReset := false
@@ -170,6 +183,8 @@ func watchDetails(api *client.Client) {
 				connectionsReset = true
 			}
 			pendingConnections = append(pendingConnections, update.Events...)
+		case update := <-api.Taildrop:
+			_ = encoder.Encode(event{Type: "taildrop", Data: update})
 		case update := <-api.Logs:
 			if update.Reset {
 				pendingLogs = pendingLogs[:0]
@@ -270,8 +285,15 @@ func fetchMetadata(parent context.Context, api *client.Client) metadataUpdate {
 	return update
 }
 
-func runAction(api *client.Client, args []string) error {
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+// runAction performs a one-shot command and optionally returns a payload for
+// the "result" line, which QML reads back for actions whose outcome it has to
+// show — currently the path taildrop-save wrote to.
+func runAction(api *client.Client, args []string) (any, error) {
+	timeout := 10 * time.Second
+	if len(args) > 0 && (args[0] == "taildrop-send" || args[0] == "taildrop-save" || args[0] == "taildrop-preview") {
+		timeout = 24 * time.Hour
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 
 	require := func(count int, usage string) error {
@@ -284,37 +306,115 @@ func runAction(api *client.Client, args []string) error {
 	switch args[0] {
 	case "mode":
 		if err := require(2, "mode <name>"); err != nil {
-			return err
+			return nil, err
 		}
-		return api.SetClashMode(ctx, args[1])
+		return nil, api.SetClashMode(ctx, args[1])
 	case "select":
 		if err := require(3, "select <group> <outbound>"); err != nil {
-			return err
+			return nil, err
 		}
-		return api.SelectOutbound(ctx, args[1], args[2])
+		return nil, api.SelectOutbound(ctx, args[1], args[2])
 	case "url-test":
 		if err := require(2, "url-test <outbound>"); err != nil {
-			return err
+			return nil, err
 		}
-		return api.URLTest(ctx, args[1])
+		return nil, api.URLTest(ctx, args[1])
 	case "close":
 		if err := require(2, "close <connection-id>"); err != nil {
-			return err
+			return nil, err
 		}
-		return api.CloseConnection(ctx, args[1])
+		return nil, api.CloseConnection(ctx, args[1])
 	case "close-all":
 		if err := require(1, "close-all"); err != nil {
-			return err
+			return nil, err
 		}
-		return api.CloseAllConnections(ctx)
+		return nil, api.CloseAllConnections(ctx)
+	case "tailscale-exit":
+		if err := require(3, "tailscale-exit <endpoint> <stable-id>"); err != nil {
+			return nil, err
+		}
+		return nil, api.SetTailscaleExitNode(ctx, args[1], args[2])
+	case "tailscale-exit-clear":
+		if err := require(2, "tailscale-exit-clear <endpoint>"); err != nil {
+			return nil, err
+		}
+		return nil, api.SetTailscaleExitNode(ctx, args[1], "")
+	case "taildrop-send":
+		if len(args) < 4 {
+			return nil, fmt.Errorf("usage: taildrop-send <endpoint> <peer-id> <file>...")
+		}
+		return nil, api.SendTaildropFiles(ctx, args[1], args[2], args[3:])
+	case "taildrop-save":
+		if err := require(3, "taildrop-save <endpoint> <name>"); err != nil {
+			return nil, err
+		}
+		dir, err := downloadDir()
+		if err != nil {
+			return nil, err
+		}
+		path, err := api.DownloadTaildropFile(ctx, args[1], args[2], dir)
+		if err != nil {
+			return nil, err
+		}
+		// A saved file leaves the inbox, matching the official Tailscale
+		// clients. If the removal fails the download still succeeded, so
+		// report the save — the entry just reappears in the next update.
+		_ = api.DeleteTaildropFile(ctx, args[1], args[2])
+		return savedFile{Path: path}, nil
+	case "taildrop-preview":
+		if err := require(3, "taildrop-preview <endpoint> <name>"); err != nil {
+			return nil, err
+		}
+		dir, err := previewDir()
+		if err != nil {
+			return nil, err
+		}
+		path, err := api.PreviewTaildropFile(ctx, args[1], args[2], dir)
+		if err != nil {
+			return nil, err
+		}
+		return savedFile{Path: path}, nil
+	case "taildrop-delete":
+		if err := require(3, "taildrop-delete <endpoint> <name>"); err != nil {
+			return nil, err
+		}
+		return nil, api.DeleteTaildropFile(ctx, args[1], args[2])
+	case "tailscale-logout":
+		if err := require(2, "tailscale-logout <endpoint>"); err != nil {
+			return nil, err
+		}
+		return nil, api.TailscaleLogout(ctx, args[1])
 	case "clear-logs":
 		if err := require(1, "clear-logs"); err != nil {
-			return err
+			return nil, err
 		}
-		return api.ClearLogs(ctx)
+		return nil, api.ClearLogs(ctx)
 	default:
-		return fmt.Errorf("unknown command %q", args[0])
+		return nil, fmt.Errorf("unknown command %q", args[0])
 	}
+}
+
+// downloadDir is where taildrop-save puts received files.
+func downloadDir() (string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", fmt.Errorf("resolve home directory: %w", err)
+	}
+	return filepath.Join(home, "Downloads"), nil
+}
+
+// previewDir is scratch space for taildrop-preview. It is a cache, not a
+// destination: the file stays in the inbox, and each preview overwrites the
+// previous copy of the same name rather than piling up numbered variants.
+func previewDir() (string, error) {
+	if cache := os.Getenv("XDG_CACHE_HOME"); cache != "" {
+		return filepath.Join(cache, "sinbar", "taildrop"), nil
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", fmt.Errorf("resolve home directory: %w", err)
+	}
+	return filepath.Join(home, ".cache", "sinbar", "taildrop"), nil
 }
 
 func compactError(err error) string {

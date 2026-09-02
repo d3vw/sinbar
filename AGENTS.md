@@ -15,9 +15,9 @@ Sinbar is an Omarchy Quattro bar plugin that monitors and controls sing-box thro
 ## UI Requirements
 
 - Preserve a fixed-width bar layout so speed changes never resize the module.
-- Keep the icon and both speed readouts inside one continuous click target.
+- Keep the icon and the bar speed readout (download only) inside one continuous click target.
 - Draw the open-panel indicator across the complete clickable area.
-- Use the `📦` glyph as the Sinbar icon.
+- Use the `󰏗` Nerd Font glyph as the Sinbar icon so it inherits the bar's theme color.
 - Keep keyboard navigation consistent with terminal and TUI conventions.
 - Preserve support for left click, middle click, and right click behavior.
 

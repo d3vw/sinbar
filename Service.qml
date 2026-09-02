@@ -30,6 +30,20 @@ Item {
 
   property var groups: []
   property var connections: []
+  property string tailscaleEndpoint: ""
+  property string tailscaleState: "Unavailable"
+  property string tailscaleAuthUrl: ""
+  property string tailscaleNetwork: ""
+  property var tailscaleSelf: null
+  property var tailscalePeers: []
+  property var tailscaleExitNode: null
+  property bool tailscaleCanShareFiles: false
+  // Files other devices have sent here, still waiting in sing-box's staging
+  // area. Only streamed while the panel is open.
+  property var taildropInbox: []
+  // Files dropped on the bar item, waiting for the user to pick a peer.
+  property var pendingTaildropFiles: []
+  property bool taildropPickMode: false
   property var logs: []
   property bool logsEnabled: false
   property var _connectionMap: ({})
@@ -110,6 +124,8 @@ Item {
     else if (message.type === "service") applyService(data)
     else if (message.type === "status") applyStatus(data)
     else if (message.type === "groups") groups = data.Groups || []
+    else if (message.type === "tailscale") applyTailscale(data)
+    else if (message.type === "taildrop") taildropInbox = data.files || []
     else if (message.type === "connections") applyConnections(data)
     else if (message.type === "logs") applyLogs(data)
   }
@@ -142,6 +158,17 @@ Item {
     uplinkTotal = Number(data.UplinkTotal || 0)
     downlinkTotal = Number(data.DownlinkTotal || 0)
     connected = true
+  }
+
+  function applyTailscale(data) {
+    tailscaleEndpoint = String(data.endpointTag || "")
+    tailscaleState = String(data.backendState || "Unavailable")
+    tailscaleAuthUrl = String(data.authUrl || "")
+    tailscaleNetwork = String(data.networkName || data.magicDNSSuffix || "")
+    tailscaleSelf = data.self || null
+    tailscalePeers = data.peers || []
+    tailscaleExitNode = data.exitNode || null
+    tailscaleCanShareFiles = data.canShareFiles === true
   }
 
   function applyConnections(data) {
@@ -191,11 +218,14 @@ Item {
     logs = next
   }
 
-  function runAction(args, pendingText, successText) {
+  // doneCallback, when given, receives the path the bridge reported once the
+  // action succeeds — that is how a preview knows what to hand to xdg-open.
+  function runAction(args, pendingText, successText, doneCallback) {
     if (actionProcess.running) return
     actionStatus = pendingText || "Working…"
     lastError = ""
     actionProcess.successText = successText || "Done"
+    actionProcess.doneCallback = doneCallback || null
     actionProcess.command = bridgeCommand(args)
     actionProcess.running = true
   }
@@ -221,6 +251,94 @@ Item {
 
   function closeAllConnections() {
     runAction(["close-all"], "Closing all connections…", "All connections closed")
+  }
+
+  function chooseTaildropFiles(peer) {
+    if (!peer || !peer.id || peer.canReceiveFiles !== true || !tailscaleCanShareFiles || filePicker.running) return
+    filePicker.peerID = String(peer.id)
+    filePicker.peerName = String(peer.hostName || peer.dnsName || "peer")
+    filePicker.command = ["omarchy-file-select", "--title", "Send with Tailscale", "--multiple"]
+    filePicker.running = true
+  }
+
+  function taildropEligible(peer) {
+    return peer && peer.id && peer.online === true && peer.canReceiveFiles === true
+      && tailscaleCanShareFiles && tailscaleEndpoint !== ""
+  }
+
+  // Convert a drag-and-drop url list into local file paths and enter the
+  // "pick a peer" state. Directories and non-local urls are dropped here so
+  // the recipient list only has to worry about a clean file list.
+  function beginTaildropDrop(urls) {
+    var files = []
+    for (var i = 0; i < (urls || []).length; i++) {
+      var raw = String(urls[i] || "")
+      if (raw.indexOf("file://") !== 0) continue
+      if (raw.charAt(raw.length - 1) === "/") continue
+      var path = localPath(raw)
+      if (path !== "") files.push(path)
+    }
+    pendingTaildropFiles = files
+    taildropPickMode = files.length > 0
+    return taildropPickMode
+  }
+
+  function sendTaildropTo(peer) {
+    if (!taildropPickMode || pendingTaildropFiles.length === 0) return
+    if (!taildropEligible(peer) || actionProcess.running) return
+    var files = pendingTaildropFiles.slice()
+    var name = String(peer.hostName || peer.dnsName || "peer")
+    runAction(["taildrop-send", tailscaleEndpoint, String(peer.id)].concat(files),
+              "Sending " + files.length + " file(s)…", "Sent to " + name)
+    pendingTaildropFiles = []
+    taildropPickMode = false
+  }
+
+  function cancelTaildropDrop() {
+    pendingTaildropFiles = []
+    taildropPickMode = false
+  }
+
+  function saveTaildropFile(file) {
+    if (!file || !file.name || tailscaleEndpoint === "") return
+    // %s is filled from the path the bridge reports, so a name that collided
+    // in ~/Downloads shows the rename it actually got.
+    runAction(["taildrop-save", tailscaleEndpoint, String(file.name)],
+              "Saving " + String(file.name) + "…", "Saved · %s")
+  }
+
+  // Emitted once a previewed file is staged on disk. The panel owns the launch
+  // because it also owns the keyboard grab it has to hand back first.
+  signal previewReady(string path)
+
+  // Stage a received file so it can be opened with whatever the desktop uses
+  // for its type. It goes to a cache directory rather than being saved: a look
+  // must not consume it, so it stays in the inbox and the save button keeps
+  // its meaning.
+  function previewTaildropFile(file) {
+    if (!file || !file.name || tailscaleEndpoint === "") return
+    runAction(["taildrop-preview", tailscaleEndpoint, String(file.name)],
+              "Opening " + String(file.name) + "…", "Opened " + String(file.name),
+              function(path) { if (path !== "") root.previewReady(path) })
+  }
+
+  function deleteTaildropFile(file) {
+    if (!file || !file.name || tailscaleEndpoint === "") return
+    runAction(["taildrop-delete", tailscaleEndpoint, String(file.name)],
+              "Discarding " + String(file.name) + "…", "Discarded " + String(file.name))
+  }
+
+  function setTailscaleExitNode(peer) {
+    if (!peer || !peer.id || tailscaleEndpoint === "") return
+    runAction(["tailscale-exit", tailscaleEndpoint, String(peer.id)], "Switching exit node…", "Exit node switched")
+  }
+
+  function clearTailscaleExitNode() {
+    if (tailscaleEndpoint !== "") runAction(["tailscale-exit-clear", tailscaleEndpoint], "Clearing exit node…", "Exit node cleared")
+  }
+
+  function tailscaleLogout() {
+    if (tailscaleEndpoint !== "") runAction(["tailscale-logout", tailscaleEndpoint], "Logging out…", "Tailscale logged out")
   }
 
   function clearLogs() {
@@ -257,8 +375,35 @@ Item {
   }
 
   Process {
+    id: filePicker
+    property string peerID: ""
+    property string peerName: ""
+    command: []
+    running: false
+    stdout: StdioCollector { id: pickerStdout; waitForEnd: true }
+    stderr: StdioCollector { id: pickerStderr; waitForEnd: true }
+    onExited: function(exitCode) {
+      if (exitCode === 1) return
+      if (exitCode !== 0) {
+        root.lastError = String(pickerStderr.text || "File picker failed").trim()
+        return
+      }
+      var lines = String(pickerStdout.text || "").split("\n")
+      var files = []
+      for (var i = 0; i < lines.length; i++) {
+        var path = lines[i].trim()
+        if (path !== "") files.push(path)
+      }
+      if (files.length === 0) return
+      root.runAction(["taildrop-send", root.tailscaleEndpoint, peerID].concat(files),
+                     "Sending " + files.length + " file(s)…", "Sent to " + peerName)
+    }
+  }
+
+  Process {
     id: actionProcess
     property string successText: ""
+    property var doneCallback: null
     property string output: ""
     command: []
     running: false
@@ -268,15 +413,22 @@ Item {
     onExited: function(exitCode) {
       var raw = String(actionStdout.text || "").trim()
       var errorText = String(actionStderr.text || "").trim()
+      var resultPath = ""
       if (raw !== "") {
         try {
           var result = JSON.parse(raw.split("\n").pop())
           if (result.error) errorText = String(result.error)
+          if (result.data && result.data.path) resultPath = String(result.data.path)
         } catch (e) {}
       }
+      var callback = doneCallback
+      doneCallback = null
       if (exitCode === 0 && errorText === "") {
-        root.actionStatus = successText
+        root.actionStatus = resultPath !== "" && successText.indexOf("%s") !== -1
+          ? successText.replace("%s", resultPath.split("/").pop())
+          : successText.replace("%s", "")
         root.lastError = ""
+        if (callback) callback(resultPath)
       } else {
         root.actionStatus = ""
         root.lastError = errorText || "Bridge action failed"

@@ -4,16 +4,20 @@ A keyboard-first [sing-box](https://sing-box.sagernet.org) tray plugin for the O
 
 ## Features
 
-- Live upload/download rates and totals in the bar and panel
+- Live download rate in the bar; upload/download rates and totals in the panel
 - sing-box service, version, memory, goroutine, connection, and uptime status
 - Select outbound nodes and run URL tests
 - Switch Clash modes
+- View sing-box Tailscale endpoint identity and peers, copy peer IPs, send files with Taildrop, and select or clear an Exit Node
+- Drag files onto the bar item to send them to a Tailscale peer with Taildrop
+- See the files other devices sent you with Taildrop, open one to look at it, save it to `~/Downloads`, or discard it
+- Open the Tailscale authentication link when the endpoint needs login
 - Inspect and close active connections
 - Follow, filter, and clear sing-box logs, with sing-box's own log colors rendered instead of raw ANSI codes
 - Mouse controls and TUI-style keyboard navigation
 - Right-click the bar item to open a configurable TUI command in the terminal
 
-Sinbar talks to the sing-box `StartedService` gRPC API through a small Go bridge. QML never receives the API secret.
+Sinbar talks to the sing-box `StartedService` gRPC API through a small Go bridge. Tailscale status, Exit Node changes, and logout support use the same gRPC service directly—no native `tailscaled` or `tailscale` CLI is required. QML never receives the API secret.
 
 ## Requirements
 
@@ -34,6 +38,7 @@ port = 9999
 secret = "your-api-secret"
 tls = false
 interval_ms = 1000
+tailscale_endpoint = "Tailscale"
 ```
 
 | Field | Meaning |
@@ -42,6 +47,7 @@ interval_ms = 1000
 | `secret` | Auth secret for that API, if you configured one |
 | `tls` | Whether the gRPC connection should use TLS |
 | `interval_ms` | How often the bridge polls for status updates |
+| `tailscale_endpoint` | Tailscale endpoint tag to display and control; defaults to `Tailscale` |
 
 These must match whatever you configured in sing-box, not the other way around. If the file
 doesn't exist, Sinbar falls back to `127.0.0.1:9999`, no secret, and a 1000ms interval — only
@@ -107,7 +113,9 @@ From a local checkout, `make uninstall-local` runs the same command.
 | Left click | Open or close panel |
 | Right click | Open the configured TUI command |
 | Middle click | Restart the API bridge |
-| `1` / `2` / `3` | Routes / Connections / Logs |
+| Drag & drop files | Open the Tailscale tab to pick a peer, then Taildrop the files to it |
+| Click a received file | Open it with the desktop's default application |
+| `1` / `2` / `3` / `4` | Routes / Connections / Logs / Tailscale |
 | `h` / `l` | Previous / next tab |
 | `j` / `k` | Move selection |
 | `Enter` | Select route; on Connections, close selected connection |

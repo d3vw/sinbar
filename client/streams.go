@@ -15,6 +15,7 @@ func (c *Client) startStreams() {
 	go c.runGroupsStream()
 	go c.runConnectionsStream()
 	go c.runLogStream()
+	go c.runTailscaleStream()
 }
 
 // withRetry runs fn in a loop, applying exponential backoff on error.
@@ -115,6 +116,60 @@ func (c *Client) runConnectionsStream() {
 				return err
 			}
 			c.Connections <- translateConnections(msg)
+		}
+	})
+}
+
+func (c *Client) runTailscaleStream() {
+	c.withRetry(func() error {
+		stream, err := c.svc.SubscribeTailscaleStatus(c.ctx, &emptypb.Empty{})
+		if err != nil {
+			return err
+		}
+		for {
+			msg, err := stream.Recv()
+			if err != nil {
+				return err
+			}
+			matched := false
+			for _, endpoint := range msg.Endpoints {
+				if c.cfg.TailscaleEndpoint == "" || endpoint.EndpointTag == c.cfg.TailscaleEndpoint {
+					sendLatest(c.Tailscale, translateTailscale(endpoint))
+					matched = true
+					break
+				}
+			}
+			if !matched {
+				sendLatest(c.Tailscale, TailscaleStatusUpdate{
+					EndpointTag: c.cfg.TailscaleEndpoint, BackendState: "Unavailable", Peers: []TailscalePeer{},
+				})
+			}
+		}
+	})
+}
+
+// StartTaildropInbox subscribes to the configured endpoint's Taildrop inbox.
+// Unlike the streams Connect() brings up, this one is opt-in: TaildropInbox
+// carries in-flight receive progress, so only the detail bridge — which lives
+// just as long as the panel is open — subscribes to it.
+func (c *Client) StartTaildropInbox() {
+	go c.runTaildropInboxStream()
+}
+
+func (c *Client) runTaildropInboxStream() {
+	c.withRetry(func() error {
+		stream, err := c.svc.SubscribeTaildropInbox(c.ctx, &daemon.SubscribeTaildropInboxRequest{
+			EndpointTag: c.cfg.TailscaleEndpoint,
+		})
+		if err != nil {
+			return err
+		}
+		for {
+			msg, err := stream.Recv()
+			if err != nil {
+				return err
+			}
+			sendLatest(c.Taildrop, translateTaildropInbox(msg))
 		}
 	})
 }
@@ -230,6 +285,48 @@ func translateConnections(e *daemon.ConnectionEvents) ConnectionsUpdate {
 		}
 	}
 	return out
+}
+
+func translateTailscale(endpoint *daemon.TailscaleEndpointStatus) TailscaleStatusUpdate {
+	update := TailscaleStatusUpdate{
+		EndpointTag: endpoint.EndpointTag, BackendState: endpoint.BackendState,
+		AuthURL: endpoint.AuthURL, NetworkName: endpoint.NetworkName,
+		MagicDNS: endpoint.MagicDNSSuffix, KeyAuth: endpoint.KeyAuth, CanShareFiles: endpoint.CanShareFiles,
+		Peers: make([]TailscalePeer, 0),
+	}
+	toPeer := func(peer *daemon.TailscalePeer, userID int64, login string) *TailscalePeer {
+		if peer == nil {
+			return nil
+		}
+		return &TailscalePeer{HostName: peer.HostName, DNSName: peer.DnsName, OS: peer.Os,
+			TailscaleIPs: peer.TailscaleIPs, Online: peer.Online, ExitNode: peer.ExitNode,
+			ExitNodeOption: peer.ExitNodeOption, Active: peer.Active, StableID: peer.StableID,
+			UserID: userID, LoginName: login, CanReceiveFiles: peer.CanReceiveFiles}
+	}
+	update.Self = toPeer(endpoint.Self, 0, "")
+	update.ExitNode = toPeer(endpoint.ExitNode, 0, "")
+	for _, group := range endpoint.UserGroups {
+		for _, peer := range group.Peers {
+			update.Peers = append(update.Peers, *toPeer(peer, group.UserID, group.LoginName))
+		}
+	}
+	return update
+}
+
+func translateTaildropInbox(inbox *daemon.TaildropInbox) TaildropInboxUpdate {
+	update := TaildropInboxUpdate{
+		EndpointTag: inbox.EndpointTag,
+		Files:       make([]TaildropFile, 0, len(inbox.Files)),
+	}
+	for _, file := range inbox.Files {
+		update.Files = append(update.Files, TaildropFile{
+			Name:       file.Name,
+			Size:       file.Size,
+			SenderName: file.SenderName,
+			ModifiedAt: file.ModifiedAt,
+		})
+	}
+	return update
 }
 
 func translateLog(l *daemon.Log) LogUpdate {

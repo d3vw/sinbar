@@ -19,11 +19,17 @@ Panel {
   property bool cursorActive: false
   property string logFilterText: ""
   property bool logFilterEditing: false
+  property bool inboxCollapsed: false
 
   readonly property color foreground: bar ? bar.foreground : Color.foreground
   readonly property color barText: bar ? bar.barForeground : Color.foreground
   readonly property color dim: Qt.darker(foreground, 1.55)
   readonly property color faint: Qt.darker(foreground, 2.05)
+  // barText already tracks the bar's real (possibly sampled) background,
+  // unlike the static theme foreground above — the speed readout lives in
+  // the bar chrome itself, so its dim/faint shades must derive from that.
+  readonly property color barDim: Qt.darker(barText, 1.55)
+  readonly property color barFaint: Qt.darker(barText, 2.05)
   readonly property color urgent: bar ? bar.urgent : Color.urgent
   readonly property color accent: Color.accent
   readonly property string fontFamily: bar ? bar.fontFamily : Style.font.family
@@ -49,7 +55,7 @@ Panel {
     if (proxy.serviceStatus === 4) return "FATAL"
     return "CONNECTED"
   }
-  readonly property string statusGlyph: "📦"
+  readonly property string statusGlyph: "󰏗"
   readonly property color statusColor: proxy.connected ? foreground : urgent
 
   function arrayLength(value) {
@@ -97,7 +103,7 @@ Panel {
   }
 
   function switchTab(index) {
-    activeTab = (index + 3) % 3
+    activeTab = (index + 4) % 4
     cursorActive = true
     contentScroll.contentY = 0
   }
@@ -154,6 +160,7 @@ Panel {
     if (text === "1") switchTab(0)
     else if (text === "2") switchTab(1)
     else if (text === "3") switchTab(2)
+    else if (text === "4") switchTab(3)
     else if (text === "m" || text === "M") cycleMode()
     else if (text === "u" || text === "U") {
       if (activeTab === 0 && selectedRoute) proxy.urlTest(selectedRoute.Tag)
@@ -173,15 +180,14 @@ Panel {
   }
 
   // Suppress the shell's shorter default mark and draw one across Sinbar's
-  // complete clickable area: icon plus both speed readouts.
+  // complete clickable area: icon plus the speed readout.
   readonly property real openPanelIndicatorWidth: 0.1
   readonly property real openPanelIndicatorHeight: 0.1
   readonly property bool barVertical: bar ? bar.vertical : false
-  readonly property real speedLaneWidth: Style.space(42)
+  readonly property real speedLaneWidth: Style.space(46)
   readonly property real speedLeadingGap: Style.space(1)
-  readonly property real speedLaneGap: Style.space(1)
   readonly property real statusBarWidth: showSpeeds
-    ? Style.bar.iconSlot + speedLeadingGap + speedLaneWidth * 2 + speedLaneGap
+    ? Style.bar.iconSlot + speedLeadingGap + speedLaneWidth
     : Style.bar.iconSlot
 
   implicitWidth: barVertical ? barButton.implicitWidth : statusBarWidth
@@ -195,12 +201,16 @@ Panel {
       Qt.callLater(function() { keyCatcher.forceActiveFocus() })
     } else {
       logFilterEditing = false
+      proxy.cancelTaildropDrop()
     }
   }
   onSelectableGroupsChanged: clampCursors()
   onCurrentRoutesChanged: clampCursors()
   onCurrentGroupChanged: routeIndex = 0
-  onActiveTabChanged: if (activeTab !== 2) logFilterEditing = false
+  onActiveTabChanged: {
+    if (activeTab !== 2) logFilterEditing = false
+    if (activeTab !== 3) proxy.cancelTaildropDrop()
+  }
 
   Service {
     id: proxy
@@ -210,6 +220,13 @@ Panel {
   Connections {
     target: proxy
     function onConnectionsChanged() { root.clampCursors() }
+
+    // Close before launching, the same way openTui() does: while the panel
+    // holds the layer-shell keyboard grab, the viewer's window maps unfocused.
+    function onPreviewReady(path) {
+      root.close()
+      Quickshell.execDetached(["xdg-open", path])
+    }
   }
 
   WidgetButton {
@@ -232,7 +249,9 @@ Panel {
       anchors.verticalCenter: parent.verticalCenter
       width: Style.bar.iconSlot
       text: root.statusGlyph
-      font.pixelSize: Style.font.icon
+      color: root.statusColor
+      font.family: root.fontFamily
+      font.pixelSize: Style.fontPx(1.1)
       horizontalAlignment: Text.AlignHCenter
       verticalAlignment: Text.AlignVCenter
       opacity: proxy.connected ? 1.0 : 0.45
@@ -246,26 +265,19 @@ Panel {
   }
 
   // Telemetry stays visually separate, while the full-size WidgetButton behind
-  // it makes the icon and both readouts one continuous click target.
+  // it makes the icon and the speed readout one continuous click target.
   Row {
     id: speedReadout
     visible: !root.barVertical && root.showSpeeds
     anchors.left: parent.left
     anchors.leftMargin: Style.bar.iconSlot + root.speedLeadingGap
     anchors.verticalCenter: parent.verticalCenter
-    spacing: root.speedLaneGap
-
-    SpeedLine {
-      glyph: "↑"
-      value: proxy.uplink
-      tone: proxy.connected ? root.accent : root.urgent
-      forceActive: !proxy.connected
-    }
+    width: root.speedLaneWidth
 
     SpeedLine {
       glyph: "↓"
       value: proxy.downlink
-      tone: proxy.connected ? root.foreground : root.urgent
+      tone: proxy.connected ? root.barText : root.urgent
       forceActive: !proxy.connected
     }
   }
@@ -287,6 +299,47 @@ Panel {
       ? inset
       : ((root.bar && root.bar.position === "bottom") ? inset : root.height - height - inset)
     z: 50
+
+    Behavior on opacity { NumberAnimation { duration: 120; easing.type: Easing.OutCubic } }
+  }
+
+  // Drag a file from the file manager onto the bar item to send it with
+  // Taildrop: the drop opens the panel on the Tailscale tab in a mode where
+  // clicking a peer sends the dropped files to it.
+  DropArea {
+    id: dropZone
+    anchors.fill: parent
+    z: 100
+    keys: ["text/uri-list"]
+
+    property bool dragHover: false
+
+    onEntered: function(drag) {
+      if (drag.hasUrls) dragHover = true
+      else drag.accepted = false
+    }
+    onExited: dragHover = false
+    onDropped: function(drop) {
+      dragHover = false
+      if (!drop.hasUrls) return
+      drop.acceptProposedAction()
+      if (proxy.beginTaildropDrop(drop.urls)) {
+        if (!root.opened) root.toggle()
+        root.switchTab(3)
+      }
+    }
+  }
+
+  Rectangle {
+    id: dropIndicator
+    anchors.fill: parent
+    visible: opacity > 0
+    opacity: dropZone.dragHover ? 1 : 0
+    color: Qt.rgba(root.accent.r, root.accent.g, root.accent.b, 0.14)
+    border.color: root.accent
+    border.width: 1
+    radius: Style.cornerRadius
+    z: 99
 
     Behavior on opacity { NumberAnimation { duration: 120; easing.type: Easing.OutCubic } }
   }
@@ -328,7 +381,9 @@ Panel {
           iconComponent: Component {
             Text {
               text: root.statusGlyph
-              font.pixelSize: Style.font.display
+              color: root.foreground
+              font.family: root.fontFamily
+              font.pixelSize: Math.round(Style.font.display * 0.8)
             }
           }
           trailingControl: Component {
@@ -395,15 +450,16 @@ Panel {
 
           Repeater {
             model: [
-              { label: "1  ROUTES", count: root.currentRoutes.length },
-              { label: "2  CONNECTIONS", count: proxy.connections.length },
-              { label: "3  LOGS", count: proxy.logs.length }
+              { label: "1 ROUTES", count: root.currentRoutes.length },
+              { label: "2 CONNS", count: proxy.connections.length },
+              { label: "3 LOGS", count: proxy.logs.length },
+              { label: "4 TAILSCALE", count: proxy.tailscalePeers.length }
             ]
 
             CursorSurface {
               required property var modelData
               required property int index
-              width: (tabs.width - tabs.spacing * 2) / 3
+              width: (tabs.width - tabs.spacing * 3) / 4
               height: Style.space(34)
               current: root.activeTab === index
               hasCursor: false
@@ -577,6 +633,271 @@ Panel {
             }
 
             Column {
+              visible: root.activeTab === 3
+              width: parent.width
+              spacing: Style.space(8)
+
+              PanelSectionHeader {
+                width: parent.width
+                text: "TAILSCALE · " + String(proxy.tailscaleState || "Unavailable").toUpperCase()
+                foreground: root.foreground
+                fontFamily: root.fontFamily
+              }
+
+              CursorSurface {
+                visible: proxy.taildropPickMode
+                width: parent.width
+                implicitHeight: Style.space(40)
+                current: true
+                foreground: root.accent
+
+                Row {
+                  anchors.fill: parent
+                  anchors.leftMargin: Style.space(10)
+                  anchors.rightMargin: Style.space(8)
+                  spacing: Style.space(8)
+
+                  Text {
+                    width: parent.width - cancelDropButton.width - parent.spacing
+                    anchors.verticalCenter: parent.verticalCenter
+                    text: "⇢ Sending " + proxy.pendingTaildropFiles.length
+                      + (proxy.pendingTaildropFiles.length === 1 ? " file" : " files")
+                      + " · pick a peer, Esc to cancel"
+                    color: root.foreground
+                    font.family: root.fontFamily
+                    font.pixelSize: Style.font.bodySmall
+                    elide: Text.ElideRight
+                  }
+
+                  PanelActionButton {
+                    id: cancelDropButton
+                    anchors.verticalCenter: parent.verticalCenter
+                    iconText: "󰅖"
+                    tooltipText: "Cancel Taildrop"
+                    foreground: root.foreground
+                    hoverColor: root.urgent
+                    fontFamily: root.fontFamily
+                    onClicked: proxy.cancelTaildropDrop()
+                  }
+                }
+              }
+
+              Text {
+                width: parent.width
+                text: proxy.tailscaleSelf
+                  ? String(proxy.tailscaleSelf.hostName || "This device") + "  ·  "
+                    + String((proxy.tailscaleSelf.tailscaleIPs || ["—"])[0]) + "  ·  " + proxy.tailscaleNetwork
+                  : (proxy.tailscaleEndpoint === "" ? "No matching Tailscale endpoint." : "Waiting for node information…")
+                color: root.dim
+                font.family: root.fontFamily
+                font.pixelSize: Style.font.bodySmall
+                wrapMode: Text.WordWrap
+              }
+
+              Row {
+                spacing: Style.space(6)
+                PanelActionButton {
+                  iconText: "󰖟"
+                  tooltipText: "Open Tailscale login"
+                  foreground: root.foreground
+                  fontFamily: root.fontFamily
+                  visible: proxy.tailscaleAuthUrl !== ""
+                  onClicked: Quickshell.execDetached(["omarchy-launch-browser", proxy.tailscaleAuthUrl])
+                }
+                PanelActionButton {
+                  iconText: "󰍃"
+                  tooltipText: "Clear exit node"
+                  foreground: root.foreground
+                  fontFamily: root.fontFamily
+                  visible: proxy.tailscaleExitNode !== null
+                  onClicked: proxy.clearTailscaleExitNode()
+                }
+              }
+
+              // Files other devices have sent us. Rendered only when the inbox
+              // is non-empty — the panel is compact and an always-present empty
+              // section would just push the peer list down.
+              Column {
+                id: inboxSection
+                visible: proxy.taildropInbox.length > 0
+                width: parent.width
+                spacing: Style.space(4)
+
+                // The whole header toggles, not just the chevron — the button is
+                // declared last so it stays above the full-width MouseArea and
+                // keeps its own hover state and tooltip.
+                Item {
+                  width: parent.width
+                  height: inboxToggle.implicitHeight
+
+                  MouseArea {
+                    anchors.fill: parent
+                    cursorShape: Qt.PointingHandCursor
+                    onClicked: root.inboxCollapsed = !root.inboxCollapsed
+                  }
+
+                  PanelSectionHeader {
+                    anchors.left: parent.left
+                    anchors.verticalCenter: parent.verticalCenter
+                    text: "RECEIVED FILES · " + proxy.taildropInbox.length
+                    foreground: root.foreground
+                    fontFamily: root.fontFamily
+                  }
+
+                  PanelActionButton {
+                    id: inboxToggle
+                    anchors.right: parent.right
+                    iconText: root.inboxCollapsed ? "󰅂" : "󰅀"
+                    tooltipText: root.inboxCollapsed ? "Show received files" : "Hide received files"
+                    foreground: root.foreground
+                    fontFamily: root.fontFamily
+                    onClicked: root.inboxCollapsed = !root.inboxCollapsed
+                  }
+                }
+
+                Column {
+                  id: inboxRows
+                  visible: !root.inboxCollapsed
+                  width: parent.width
+                  spacing: Style.space(4)
+
+                  Repeater {
+                    model: proxy.taildropInbox
+
+                    CursorSurface {
+                      required property var modelData
+                      width: inboxRows.width
+                      implicitHeight: Style.space(52)
+                      foreground: root.foreground
+
+                      // Clicking the row opens the file with the desktop's
+                      // default handler. Declared before the Row so the action
+                      // buttons stay above it and keep their own clicks.
+                      MouseArea {
+                        anchors.fill: parent
+                        cursorShape: Qt.PointingHandCursor
+                        enabled: !proxy.busy
+                        onClicked: proxy.previewTaildropFile(modelData)
+                      }
+
+                      Row {
+                        anchors.fill: parent
+                        anchors.leftMargin: Style.space(10)
+                        anchors.rightMargin: Style.space(8)
+                        spacing: Style.space(8)
+
+                        Column {
+                          width: parent.width - saveFileButton.width - discardFileButton.width - parent.spacing * 2
+                          anchors.verticalCenter: parent.verticalCenter
+                          Text { width: parent.width; text: String(modelData.name || "File"); color: root.foreground; font.family: root.fontFamily; font.pixelSize: Style.font.body; elide: Text.ElideRight }
+                          Text { width: parent.width; text: Model.taildropSubtitle(modelData); color: root.dim; font.family: root.fontFamily; font.pixelSize: Style.font.caption; elide: Text.ElideRight }
+                        }
+
+                        PanelActionButton {
+                          id: saveFileButton
+                          iconText: "󰇚"
+                          tooltipText: "Save to ~/Downloads"
+                          foreground: root.foreground
+                          fontFamily: root.fontFamily
+                          enabled: !proxy.busy
+                          onClicked: proxy.saveTaildropFile(modelData)
+                        }
+                        PanelActionButton {
+                          id: discardFileButton
+                          iconText: "󰩹"
+                          tooltipText: "Discard without saving"
+                          foreground: root.foreground
+                          hoverColor: root.urgent
+                          fontFamily: root.fontFamily
+                          enabled: !proxy.busy
+                          onClicked: proxy.deleteTaildropFile(modelData)
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+
+              Repeater {
+                model: proxy.tailscalePeers
+
+                CursorSurface {
+                  id: peerRow
+                  required property var modelData
+                  readonly property bool pickTarget: proxy.taildropPickMode && proxy.taildropEligible(modelData)
+                  width: tabContent.width
+                  implicitHeight: Style.space(52)
+                  current: modelData.exitNode === true || pickTarget
+                  opacity: proxy.taildropPickMode && !pickTarget ? 0.4 : 1
+                  foreground: root.foreground
+
+                  Row {
+                    anchors.fill: parent
+                    anchors.leftMargin: Style.space(10)
+                    anchors.rightMargin: Style.space(8)
+                    spacing: Style.space(8)
+                    Column {
+                      width: parent.width
+                        - (sendButton.visible ? sendButton.width + parent.spacing : 0)
+                        - (copyButton.visible ? copyButton.width + parent.spacing : 0)
+                        - (exitButton.visible ? exitButton.width + parent.spacing : 0)
+                      anchors.verticalCenter: parent.verticalCenter
+                      Text { width: parent.width; text: String(modelData.hostName || modelData.dnsName || "Peer"); color: root.foreground; font.family: root.fontFamily; font.pixelSize: Style.font.body; elide: Text.ElideRight }
+                      Text { width: parent.width; text: String((modelData.tailscaleIPs || ["—"])[0]) + (modelData.online ? "  ·  online" : "  ·  offline"); color: modelData.online ? root.dim : root.faint; font.family: root.fontFamily; font.pixelSize: Style.font.caption; elide: Text.ElideRight }
+                    }
+                    PanelActionButton {
+                      id: sendButton
+                      iconText: "󰒊"
+                      tooltipText: "Send files with Taildrop"
+                      foreground: root.foreground
+                      fontFamily: root.fontFamily
+                      visible: proxy.tailscaleCanShareFiles && modelData.canReceiveFiles === true
+                      enabled: modelData.online === true && !proxy.busy
+                      onClicked: proxy.chooseTaildropFiles(modelData)
+                    }
+                    PanelActionButton {
+                      id: copyButton
+                      iconText: "󰆏"
+                      tooltipText: "Copy Tailscale IP"
+                      foreground: root.foreground
+                      fontFamily: root.fontFamily
+                      enabled: (modelData.tailscaleIPs || []).length > 0
+                      onClicked: Quickshell.execDetached(["wl-copy", String(modelData.tailscaleIPs[0])])
+                    }
+                    PanelActionButton {
+                      id: exitButton
+                      iconText: "󰒍"
+                      tooltipText: "Use as exit node"
+                      foreground: root.foreground
+                      fontFamily: root.fontFamily
+                      visible: modelData.exitNodeOption === true
+                      enabled: modelData.online === true && !proxy.busy
+                      onClicked: proxy.setTailscaleExitNode(modelData)
+                    }
+                  }
+
+                  MouseArea {
+                    anchors.fill: parent
+                    z: 10
+                    visible: proxy.taildropPickMode
+                    enabled: proxy.taildropPickMode
+                    hoverEnabled: true
+                    cursorShape: peerRow.pickTarget ? Qt.PointingHandCursor : Qt.ForbiddenCursor
+                    onClicked: proxy.sendTaildropTo(peerRow.modelData)
+                  }
+                }
+              }
+
+              EmptyState {
+                visible: proxy.tailscalePeers.length === 0
+                width: parent.width
+                text: proxy.tailscaleEndpoint === ""
+                  ? "Tailscale is not connected."
+                  : "No Tailscale peers available."
+              }
+            }
+
+            Column {
               visible: root.activeTab === 2
               width: parent.width
               spacing: Style.space(6)
@@ -737,11 +1058,11 @@ Panel {
 
     Text {
       id: arrowGlyph
-      width: Style.space(9)
+      width: Style.space(10)
       text: speedLine.glyph
-      color: root.dim
+      color: root.barDim
       font.family: root.fontFamily
-      font.pixelSize: Style.fontPx(0.75)
+      font.pixelSize: Style.fontPx(0.85)
       horizontalAlignment: Text.AlignHCenter
       verticalAlignment: Text.AlignVCenter
     }
@@ -749,9 +1070,9 @@ Panel {
     Text {
       width: speedLine.width - arrowGlyph.width - speedLine.spacing
       text: Model.formatRateFixed(speedLine.value)
-      color: speedLine.active ? speedLine.tone : root.faint
+      color: speedLine.active ? speedLine.tone : root.barFaint
       font.family: root.fontFamily
-      font.pixelSize: Style.fontPx(0.7)
+      font.pixelSize: Style.fontPx(0.8)
       font.bold: speedLine.active
       verticalAlignment: Text.AlignVCenter
       elide: Text.ElideRight

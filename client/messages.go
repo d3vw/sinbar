@@ -144,3 +144,45 @@ type VersionInfo struct {
 type ClashModeUpdate struct {
 	Mode string
 }
+
+type TailscalePeer struct {
+	HostName        string   `json:"hostName"`
+	DNSName         string   `json:"dnsName"`
+	OS              string   `json:"os"`
+	TailscaleIPs    []string `json:"tailscaleIPs"`
+	Online          bool     `json:"online"`
+	ExitNode        bool     `json:"exitNode"`
+	ExitNodeOption  bool     `json:"exitNodeOption"`
+	Active          bool     `json:"active"`
+	StableID        string   `json:"id"`
+	UserID          int64    `json:"userID,omitempty"`
+	LoginName       string   `json:"loginName,omitempty"`
+	CanReceiveFiles bool     `json:"canReceiveFiles"`
+}
+
+// TaildropFile is one file another device has sent to this node and that is
+// still waiting in sing-box's Taildrop staging area.
+type TaildropFile struct {
+	Name       string `json:"name"`
+	Size       int64  `json:"size"`
+	SenderName string `json:"senderName"`
+	ModifiedAt int64  `json:"modifiedAt"`
+}
+
+type TaildropInboxUpdate struct {
+	EndpointTag string         `json:"endpointTag"`
+	Files       []TaildropFile `json:"files"`
+}
+
+type TailscaleStatusUpdate struct {
+	EndpointTag   string          `json:"endpointTag"`
+	BackendState  string          `json:"backendState"`
+	AuthURL       string          `json:"authUrl,omitempty"`
+	NetworkName   string          `json:"networkName,omitempty"`
+	MagicDNS      string          `json:"magicDNSSuffix,omitempty"`
+	KeyAuth       bool            `json:"keyAuth"`
+	CanShareFiles bool            `json:"canShareFiles"`
+	Self          *TailscalePeer  `json:"self,omitempty"`
+	Peers         []TailscalePeer `json:"peers"`
+	ExitNode      *TailscalePeer  `json:"exitNode,omitempty"`
+}

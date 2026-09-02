@@ -9,18 +9,20 @@ import (
 )
 
 type Config struct {
-	Host       string `toml:"host"`
-	Port       int    `toml:"port"`
-	Secret     string `toml:"secret"`
-	TLS        bool   `toml:"tls"`
-	IntervalMs int64  `toml:"interval_ms"`
+	Host              string `toml:"host"`
+	Port              int    `toml:"port"`
+	Secret            string `toml:"secret"`
+	TLS               bool   `toml:"tls"`
+	IntervalMs        int64  `toml:"interval_ms"`
+	TailscaleEndpoint string `toml:"tailscale_endpoint"`
 }
 
 func Defaults() *Config {
 	return &Config{
-		Host:       "127.0.0.1",
-		Port:       9999,
-		IntervalMs: 1000,
+		Host:              "127.0.0.1",
+		Port:              9999,
+		IntervalMs:        1000,
+		TailscaleEndpoint: "Tailscale",
 	}
 }
 
