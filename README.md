@@ -25,8 +25,9 @@ Sinbar talks to the sing-box `StartedService` gRPC API through a small Go bridge
 
 - Omarchy Quattro shell
 - [sing-box](https://sing-box.sagernet.org) with the `StartedService` gRPC API enabled
-- Go 1.25 or newer to build the bridge
 - A Nerd Font for the intended icons
+- Optional: Go 1.25 or newer — only to build the bridge from source (no prebuilt
+  binary for your CPU architecture, or you'd rather build locally)
 - Optional: a terminal TUI command on `PATH` for the right-click action (configurable, disabled by default)
 
 ## Configuration
@@ -75,10 +76,11 @@ chmod 600 ~/.config/sinbar/config.toml
 omarchy plugin add https://github.com/d3vw/sinbar.git --enable
 ```
 
-This just clones the repo and enables the widget — no separate build step. The Go bridge
-(`bin/sinbar-bridge`) is built automatically from source the first time the plugin starts,
-so a Go toolchain must be on `PATH`. Startup takes a few extra seconds on that first run
-while it compiles; after that the built binary is reused.
+This just clones the repo and enables the widget — no separate build step. The first time
+the plugin starts it downloads the prebuilt `sinbar-bridge` matching the installed version
+from this repository's GitHub Releases and verifies its SHA-256; if a Go toolchain is on
+`PATH` it builds from source instead. The binary is cached in `bin/sinbar-bridge` and
+reused after that, and re-fetched when `omarchy plugin update` bumps the version.
 
 ### From a local checkout
 
@@ -160,4 +162,4 @@ qs log -p "$OMARCHY_PATH/shell" --tail 100
 
 ## Security
 
-Omarchy plugins execute unsandboxed inside the long-running shell process. Sinbar starts only its bundled bridge and explicit user actions, with no elevated privileges, install hooks, or remote downloads. The bridge reads the configured secret directly from the TOML file and does not place it in process arguments or QML state.
+Omarchy plugins execute unsandboxed inside the long-running shell process. On first start Sinbar downloads the prebuilt `sinbar-bridge` matching the installed version from this repository's GitHub Releases, verifies its SHA-256 (and build-provenance attestation) before caching it, and builds from source instead when a Go toolchain is present. Beyond that it makes no network access, needs no elevated privileges, and runs no install hooks. That is a smaller, fixed, reproducible attack surface than a first-run `go build` pulling dozens of transitive module dependencies. The bridge reads the configured secret directly from the TOML file and does not place it in process arguments or QML state.

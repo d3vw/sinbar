@@ -1,0 +1,49 @@
+name: release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+  id-token: write
+  attestations: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Tag must match manifest.json version
+        run: |
+          v=$(sed -n 's/.*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' manifest.json | head -n1)
+          [ "v$v" = "${GITHUB_REF_NAME}" ] || { echo "tag ${GITHUB_REF_NAME} != manifest v$v"; exit 1; }
+
+      - name: Build static bridges
+        run: |
+          mkdir -p dist
+          for arch in amd64 arm64; do
+            CGO_ENABLED=0 GOOS=linux GOARCH=$arch \
+              go build -trimpath -ldflags='-s -w' \
+              -o "dist/sinbar-bridge-linux-$arch" ./cmd/sinbar-bridge
+            ( cd dist && sha256sum "sinbar-bridge-linux-$arch" > "sinbar-bridge-linux-$arch.sha256" )
+          done
+
+      - uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: |
+            dist/sinbar-bridge-linux-amd64
+            dist/sinbar-bridge-linux-arm64
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/sinbar-bridge-linux-amd64
+            dist/sinbar-bridge-linux-amd64.sha256
+            dist/sinbar-bridge-linux-arm64
+            dist/sinbar-bridge-linux-arm64.sha256

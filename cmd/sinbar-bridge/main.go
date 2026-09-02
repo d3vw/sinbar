@@ -13,8 +13,8 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/grey/sinbar/client"
-	"github.com/grey/sinbar/config"
+	"github.com/d3vw/sinbar/client"
+	"github.com/d3vw/sinbar/config"
 )
 
 type event struct {

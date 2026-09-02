@@ -6,7 +6,7 @@ import (
 
 	"google.golang.org/protobuf/types/known/emptypb"
 
-	"github.com/grey/sinbar/daemon"
+	"github.com/d3vw/sinbar/daemon"
 )
 
 func (c *Client) startStreams() {

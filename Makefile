@@ -1,6 +1,7 @@
 PLUGIN_ID := io.github.d3vw.sinbar
 PLUGIN_DIR := $(HOME)/.config/omarchy/plugins/$(PLUGIN_ID)
 BRIDGE := bin/sinbar-bridge
+VERSION := $(shell sed -n 's/.*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' manifest.json | head -n1)
 
 .PHONY: build test validate check install-local uninstall-local clean
 
@@ -21,6 +22,9 @@ install-local: check
 	cp "$(BRIDGE)" "$(PLUGIN_DIR)/bin/.sinbar-bridge.new"
 	chmod 755 "$(PLUGIN_DIR)/bin/.sinbar-bridge.new"
 	mv -f "$(PLUGIN_DIR)/bin/.sinbar-bridge.new" "$(PLUGIN_DIR)/bin/sinbar-bridge"
+	printf '%s' "$(VERSION)" > "$(PLUGIN_DIR)/bin/.version"
+	mkdir -p "$(PLUGIN_DIR)/scripts"
+	cp scripts/ensure-bridge.sh "$(PLUGIN_DIR)/scripts/"
 	cp manifest.json Panel.qml Service.qml Model.js README.md LICENSE "$(PLUGIN_DIR)/"
 	omarchy-shell shell rescanPlugins
 	@for i in 1 2 3 4 5; do \

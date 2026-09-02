@@ -1,3 +1,5 @@
 /bin/sinbar-bridge
+/bin/.version
+/bin/.sinbar-bridge.*
 *.log
 /docs/superpowers/

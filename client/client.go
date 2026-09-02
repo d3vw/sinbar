@@ -17,8 +17,8 @@ import (
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/protobuf/types/known/emptypb"
 
-	"github.com/grey/sinbar/config"
-	"github.com/grey/sinbar/daemon"
+	"github.com/d3vw/sinbar/config"
+	"github.com/d3vw/sinbar/daemon"
 )
 
 // Client wraps a gRPC connection to sing-box's StartedService.

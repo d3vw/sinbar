@@ -55,8 +55,7 @@ Item {
 
   readonly property string homeDir: Quickshell.env("HOME") || ""
   readonly property string configPath: expandHome(setting("configPath", "~/.config/sinbar/config.toml"))
-  readonly property string pluginDir: localPath(Qt.resolvedUrl("."))
-  readonly property string bridgePath: localPath(Qt.resolvedUrl("bin/sinbar-bridge"))
+  readonly property string ensureScript: localPath(Qt.resolvedUrl("scripts/ensure-bridge.sh"))
 
   function setting(name, fallback) {
     var value = settings ? settings[name] : undefined
@@ -76,19 +75,11 @@ Item {
     try { return decodeURIComponent(value) } catch (e) { return value }
   }
 
-  function shQuote(value) {
-    return "'" + String(value).replace(/'/g, "'\\''") + "'"
-  }
-
   // omarchy plugin add only git-clones the repo; it never builds anything.
-  // Build the bridge from source on first run when it hasn't been staged
-  // by `make install-local` yet.
+  // ensure-bridge.sh downloads the prebuilt bridge for this arch (or builds it
+  // from source when Go is present) on first run, then exec's it.
   function bridgeCommand(args) {
-    var ensureBuilt = "test -x " + shQuote(bridgePath) +
-      " || (cd " + shQuote(pluginDir) + " && go build -trimpath -ldflags='-s -w' -o " +
-      shQuote(bridgePath) + " ./cmd/sinbar-bridge)"
-    var script = ensureBuilt + " && exec " + shQuote(bridgePath) + " \"$@\""
-    return ["sh", "-c", script, "sinbar-bridge", "--config", configPath].concat(args)
+    return ["sh", ensureScript, "--config", configPath].concat(args)
   }
 
   function restart() {

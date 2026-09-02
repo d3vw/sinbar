@@ -1,4 +1,4 @@
-module github.com/grey/sinbar
+module github.com/d3vw/sinbar
 
 go 1.25.5
 

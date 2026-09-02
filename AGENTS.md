@@ -27,9 +27,16 @@ Sinbar is an Omarchy Quattro bar plugin that monitors and controls sing-box thro
 - Install the user plugin under `~/.config/omarchy/plugins/io.github.d3vw.sinbar/`.
 - Use `make install-local` for local installation.
 - Keep bridge installation atomic to avoid `Text file busy` errors.
-- `omarchy plugin add` only git-clones the repo; it never runs a build step. Service.qml's
-  `bridgeCommand()` must keep the `test -x ... || go build ...` fallback so a bare clone can
-  still self-build `bin/sinbar-bridge` on first run.
+- `omarchy plugin add` only git-clones the repo; it never runs a build step. `bridgeCommand()`
+  in Service.qml runs `scripts/ensure-bridge.sh`, which on first run (and after `omarchy plugin
+  update` changes `manifest.json`'s version) downloads the prebuilt bridge for the arch from the
+  matching GitHub Release, verifies its SHA-256, falls back to `go build` when Go is present, and
+  otherwise errors. `bin/.version` stamps which manifest version the staged binary was built for.
+- Keep the release workflow (`.github/workflows/release.yml`) able to produce
+  `sinbar-bridge-linux-<amd64|arm64>` plus `.sha256` assets: bump `manifest.json`'s version, then
+  push a matching `vX.Y.Z` tag. The tag/version check in that workflow is intentional.
+- `make install-local` must keep copying `scripts/ensure-bridge.sh` into the plugin dir and
+  writing `bin/.version`, or a locally built bridge gets discarded and re-downloaded on first run.
 
 ## Development Workflow
 
