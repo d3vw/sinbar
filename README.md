@@ -19,6 +19,8 @@ A keyboard-first [sing-box](https://sing-box.sagernet.org) tray plugin for the O
 
 Sinbar talks to the sing-box `StartedService` gRPC API through a small Go bridge. Tailscale status, Exit Node changes, and logout support use the same gRPC service directly—no native `tailscaled` or `tailscale` CLI is required. QML never receives the API secret.
 
+<img src="docs/screenshot-tailscale.png" alt="The Tailscale tab, listing the endpoint identity, received Taildrop files, and peers" width="452">
+
 ## Requirements
 
 - Omarchy Quattro shell

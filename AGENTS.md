@@ -37,7 +37,9 @@ Sinbar is an Omarchy Quattro bar plugin that monitors and controls sing-box thro
 - Keep changes focused and avoid unrelated refactors.
 - Reuse existing helpers and components instead of duplicating logic.
 - Update `README.md` when configuration, controls, installation, or user-visible behavior changes.
-- Do not commit secrets, generated binaries, screenshots, or temporary files.
+- Do not commit secrets, generated binaries, or temporary files. The root `preview.png` and
+  the screenshots under `docs/` are deliberate listing and documentation assets; incidental
+  screenshots still do not belong in the repository.
 
 ## Validation
 
