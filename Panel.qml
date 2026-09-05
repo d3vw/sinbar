@@ -8,18 +8,48 @@ import "Model.js" as Model
 
 Panel {
   id: root
-  moduleName: "io.github.grey.sinbar"
-  ipcTarget: "io.github.grey.sinbar"
+  moduleName: "io.github.d3vw.sinbar"
+  ipcTarget: "io.github.d3vw.sinbar"
   manageIpc: false
 
   property int activeTab: 0
   property int groupIndex: 0
   property int routeIndex: 0
+  property bool routeGroupFocus: true
   property int connectionIndex: 0
+  property int peerIndex: 0
   property bool cursorActive: false
-  property string logFilterText: ""
-  property bool logFilterEditing: false
+  property var filterTexts: ({ group: "", node: "", connections: "", logs: "", tailscale: "" })
+  property bool filterEditing: false
+  readonly property string filterScope: activeTab === 0 ? (routeGroupFocus ? "group" : "node")
+    : (activeTab === 1 ? "connections" : (activeTab === 2 ? "logs" : "tailscale"))
+  readonly property string filterText: filterTexts[filterScope] || ""
   property bool inboxCollapsed: false
+  property bool shortcutHelpOpen: false
+  readonly property var shortcutHints: {
+    if (filterEditing) return [{ text: "Enter confirm", available: true }, { text: "Esc clear / exit", available: true }]
+    var hints = []
+    if (activeTab === 0) {
+      hints.push({ text: "j/k move", available: routeGroupFocus ? selectableGroups.length > 0 : currentRoutes.length > 0 })
+      hints.push({ text: routeGroupFocus ? "Tab nodes" : "Tab groups", available: true })
+      hints.push({ text: routeGroupFocus ? "Enter nodes" : "Enter select", available: routeGroupFocus ? !!currentGroup : !!selectedRoute && !proxy.busy })
+      if (!routeGroupFocus) hints.push({ text: "u test", available: !!selectedRoute && !proxy.busy })
+    } else if (activeTab === 1) {
+      hints.push({ text: "j/k move", available: filteredConnections.length > 0 })
+      hints.push({ text: "x close", available: !!selectedConnection && !proxy.busy })
+      hints.push({ text: "D close all", available: proxy.connections.length > 0 && !proxy.busy })
+    } else if (activeTab === 2) {
+      hints.push({ text: "c clear logs", available: !proxy.busy })
+    } else {
+      hints.push({ text: "j/k move", available: filteredPeers.length > 0 })
+      hints.push({ text: "s send files", available: !!selectedPeer && selectedPeer.online === true
+        && selectedPeer.canReceiveFiles === true && proxy.tailscaleCanShareFiles && !proxy.busy })
+      hints.push({ text: "c copy IP", available: !!selectedPeer && (selectedPeer.tailscaleIPs || []).length > 0 })
+    }
+    hints.push({ text: "/ filter", available: true })
+    hints.push({ text: "? help", available: true })
+    return hints
+  }
 
   readonly property color foreground: bar ? bar.foreground : Color.foreground
   readonly property color barText: bar ? bar.barForeground : Color.foreground
@@ -36,17 +66,26 @@ Panel {
   readonly property bool showSpeeds: String(setting("showSpeeds", "On")) === "On"
   readonly property string tuiCommand: String(setting("tuiCommand", ""))
   readonly property var selectableGroups: proxy && proxy.groups ? filteredGroups() : []
-  readonly property var filteredLogs: proxy && proxy.logs ? computeFilteredLogs() : []
+  readonly property var filteredLogs: filterItems(proxy.logs, filterTexts.logs, ["Message"])
+  readonly property var filteredConnections: filterItems(proxy.connections, filterTexts.connections,
+    ["Domain", "Destination", "Source", "ProcessPath", "Outbound", "Network", "Inbound"])
+  readonly property var filteredPeers: filterItems(proxy.tailscalePeers, filterTexts.tailscale,
+    ["hostName", "dnsName", "tailscaleIPs", "os"])
+  readonly property var filteredInbox: filterItems(proxy.taildropInbox, filterTexts.tailscale, ["name"])
+  readonly property int filterMatchCount: filterScope === "group" ? selectableGroups.length
+    : (filterScope === "node" ? currentRoutes.length : (filterScope === "connections" ? filteredConnections.length
+      : (filterScope === "logs" ? filteredLogs.length : filteredPeers.length + filteredInbox.length)))
   readonly property var currentGroup: arrayLength(selectableGroups) > 0
     ? selectableGroups[Math.max(0, Math.min(groupIndex, arrayLength(selectableGroups) - 1))]
     : null
-  readonly property var currentRoutes: currentGroup ? (currentGroup.Items || []) : []
+  readonly property var currentRoutes: filterItems(currentGroup ? currentGroup.Items : [], filterTexts.node, ["Tag", "Type"])
   readonly property var selectedRoute: arrayLength(currentRoutes) > 0
     ? currentRoutes[Math.max(0, Math.min(routeIndex, arrayLength(currentRoutes) - 1))]
     : null
-  readonly property var selectedConnection: proxy && arrayLength(proxy.connections) > 0
-    ? proxy.connections[Math.max(0, Math.min(connectionIndex, arrayLength(proxy.connections) - 1))]
+  readonly property var selectedConnection: arrayLength(filteredConnections) > 0
+    ? filteredConnections[Math.max(0, Math.min(connectionIndex, arrayLength(filteredConnections) - 1))]
     : null
+  readonly property var selectedPeer: filteredPeers[peerIndex] || null
   readonly property string statusLabel: {
     if (!proxy.connected) return "OFFLINE"
     if (proxy.serviceStatus === 2) return "RUNNING"
@@ -70,31 +109,48 @@ Panel {
       var group = groups[i]
       if (group && group.Selectable === true && (group.Items || []).length > 0) result.push(group)
     }
-    return result
+    return filterItems(result, filterTexts.group, ["Tag"])
   }
 
-  function computeFilteredLogs() {
-    if (logFilterText === "") return proxy.logs
-    var result = []
-    var entries = proxy.logs
-    var keyword = logFilterText.toLowerCase()
-    for (var i = 0; i < entries.length; i++) {
-      var message = String((entries[i] && entries[i].Message) || "")
-      if (message.toLowerCase().indexOf(keyword) !== -1) result.push(entries[i])
-    }
-    return result
+  function filterItems(items, query, fields) {
+    var keyword = String(query || "").trim().toLowerCase()
+    return (items || []).filter(function(item) {
+      return keyword === "" || fields.some(function(field) {
+        return String((item || {})[field] || "").toLowerCase().indexOf(keyword) !== -1
+      })
+    })
+  }
+
+  function setFilterText(text) {
+    var next = Object.assign({}, filterTexts)
+    next[filterScope] = text
+    filterTexts = next
+    if (filterScope === "group") groupIndex = 0
+    if (filterScope === "group" || filterScope === "node") routeIndex = 0
+    if (filterScope === "connections") connectionIndex = 0
+    if (filterScope === "tailscale") peerIndex = 0
+    contentScroll.contentY = 0
+  }
+
+  function finishFilter(clear) {
+    if (clear) setFilterText("")
+    filterEditing = false
+    cursorActive = true
+    keyCatcher.forceActiveFocus()
   }
 
   function clampCursors() {
     var groupCount = arrayLength(selectableGroups)
     var routeCount = arrayLength(currentRoutes)
-    var connectionCount = proxy ? arrayLength(proxy.connections) : 0
+    var connectionCount = arrayLength(filteredConnections)
     groupIndex = Math.max(0, Math.min(groupIndex, groupCount - 1))
     routeIndex = Math.max(0, Math.min(routeIndex, routeCount - 1))
     connectionIndex = Math.max(0, Math.min(connectionIndex, connectionCount - 1))
+    peerIndex = Math.max(0, Math.min(peerIndex, filteredPeers.length - 1))
   }
 
   function selectGroup(index) {
+    routeGroupFocus = true
     var count = arrayLength(selectableGroups)
     groupIndex = Math.max(0, Math.min(index, count - 1))
     routeIndex = 0
@@ -108,21 +164,37 @@ Panel {
     contentScroll.contentY = 0
   }
 
+  function switchFocus(direction) {
+    if (activeTab !== 0) {
+      switchPanel(direction)
+      return
+    }
+    routeGroupFocus = !routeGroupFocus
+    cursorActive = true
+    scrollCursorIntoView()
+  }
+
   function moveCursor(dx, dy) {
     cursorActive = true
     if (dx !== 0) {
       switchTab(activeTab + dx)
       return
     }
-    if (activeTab === 0 && currentRoutes.length > 0)
+    if (activeTab === 0 && routeGroupFocus) {
+      selectGroup(groupIndex + dy)
+    } else if (activeTab === 0 && currentRoutes.length > 0)
       routeIndex = Math.max(0, Math.min(currentRoutes.length - 1, routeIndex + dy))
-    else if (activeTab === 1 && proxy.connections.length > 0)
-      connectionIndex = Math.max(0, Math.min(proxy.connections.length - 1, connectionIndex + dy))
+    else if (activeTab === 1 && filteredConnections.length > 0)
+      connectionIndex = Math.max(0, Math.min(filteredConnections.length - 1, connectionIndex + dy))
+    else if (activeTab === 3 && filteredPeers.length > 0)
+      peerIndex = Math.max(0, Math.min(filteredPeers.length - 1, peerIndex + dy))
     scrollCursorIntoView()
   }
 
   function activateCursor() {
-    if (activeTab === 0 && currentGroup && selectedRoute)
+    if (activeTab === 0 && routeGroupFocus && currentGroup) {
+      switchFocus(1)
+    } else if (activeTab === 0 && currentGroup && selectedRoute)
       proxy.selectOutbound(currentGroup.Tag, selectedRoute.Tag)
     else if (activeTab === 1 && selectedConnection)
       proxy.closeConnection(selectedConnection.ID)
@@ -141,10 +213,10 @@ Panel {
 
   function scrollCursorIntoView() {
     Qt.callLater(function() {
-      var column = activeTab === 0 ? routeRows : (activeTab === 1 ? connectionRows : null)
-      var index = activeTab === 0 ? routeIndex : connectionIndex
-      if (!column || index < 0 || index >= column.children.length) return
-      var item = column.children[index]
+      var column = activeTab === 0 ? (routeGroupFocus ? groupRows : routeRows) : (activeTab === 1 ? connectionRows : null)
+      var index = activeTab === 0 ? (routeGroupFocus ? groupIndex : routeIndex) : connectionIndex
+      var item = activeTab === 3 ? peerRepeater.itemAt(peerIndex)
+        : (column && index >= 0 && index < column.children.length ? column.children[index] : null)
       if (!item) return
       var point = item.mapToItem(contentScroll.contentItem, 0, 0)
       var margin = Style.space(8)
@@ -156,22 +228,43 @@ Panel {
     })
   }
 
+  function sendPeerFiles(peer) {
+    if (peer && peer.online === true && peer.canReceiveFiles === true
+        && proxy.tailscaleCanShareFiles && !proxy.busy) {
+      // Release the panel's layer-shell keyboard focus before the chooser maps.
+      close()
+      Qt.callLater(function() { proxy.chooseTaildropFiles(peer) })
+    }
+  }
+
+  function copyPeerIP(peer) {
+    if (peer && (peer.tailscaleIPs || []).length > 0)
+      Quickshell.execDetached(["wl-copy", String(peer.tailscaleIPs[0])])
+  }
+
   function handleTextKey(text) {
-    if (text === "1") switchTab(0)
+    if (text === "?") shortcutHelpOpen = !shortcutHelpOpen
+    else if (text === "1") switchTab(0)
     else if (text === "2") switchTab(1)
     else if (text === "3") switchTab(2)
     else if (text === "4") switchTab(3)
     else if (text === "m" || text === "M") cycleMode()
     else if (text === "u" || text === "U") {
-      if (activeTab === 0 && selectedRoute) proxy.urlTest(selectedRoute.Tag)
+      if (activeTab === 0 && !routeGroupFocus && selectedRoute) proxy.urlTest(selectedRoute.Tag)
     } else if (text === "d" && activeTab === 1 && selectedConnection) {
       proxy.closeConnection(selectedConnection.ID)
     } else if (text === "D" && activeTab === 1) {
       proxy.closeAllConnections()
     } else if ((text === "c" || text === "C") && activeTab === 2) {
       proxy.clearLogs()
-    } else if (text === "/" && activeTab === 2) {
-      logFilterEditing = true
+    } else if (text === "s" && activeTab === 3) {
+      sendPeerFiles(selectedPeer)
+    } else if (text === "c" && activeTab === 3) {
+      copyPeerIP(selectedPeer)
+    } else if (text === "/") {
+      filterEditing = true
+      filterField.forceActiveFocus()
+      filterField.selectAll()
     } else if (text === "r" || text === "R") {
       proxy.restart()
     } else if (text === "t" || text === "T") {
@@ -200,15 +293,18 @@ Panel {
       clampCursors()
       Qt.callLater(function() { keyCatcher.forceActiveFocus() })
     } else {
-      logFilterEditing = false
+      filterEditing = false
+      shortcutHelpOpen = false
       proxy.cancelTaildropDrop()
     }
   }
   onSelectableGroupsChanged: clampCursors()
   onCurrentRoutesChanged: clampCursors()
   onCurrentGroupChanged: routeIndex = 0
+  onFilteredConnectionsChanged: clampCursors()
+  onFilteredPeersChanged: clampCursors()
+  onFilterScopeChanged: if (filterEditing) finishFilter(false)
   onActiveTabChanged: {
-    if (activeTab !== 2) logFilterEditing = false
     if (activeTab !== 3) proxy.cancelTaildropDrop()
   }
 
@@ -357,16 +453,27 @@ Panel {
     PanelKeyCatcher {
       id: keyCatcher
       anchors.fill: parent
-      blocked: root.logFilterEditing
+      blocked: root.filterEditing
       onMoveRequested: function(dx, dy) { root.moveCursor(dx, dy) }
       onActivateRequested: root.activateCursor()
-      onCloseRequested: root.close()
-      onTabRequested: function(direction) { root.switchPanel(direction) }
+      onDeleteRequested: {
+        if (root.activeTab === 1 && root.selectedConnection && !proxy.busy)
+          proxy.closeConnection(root.selectedConnection.ID)
+      }
+      onCloseRequested: {
+        if (root.shortcutHelpOpen) root.shortcutHelpOpen = false
+        else root.close()
+      }
+      onTabRequested: function(direction) { root.switchFocus(direction) }
       onTextKey: function(text) { root.handleTextKey(text) }
 
       Column {
         id: chrome
-        anchors.fill: parent
+        anchors.top: parent.top
+        anchors.left: parent.left
+        anchors.right: parent.right
+        anchors.bottom: shortcutFooter.top
+        anchors.bottomMargin: Style.space(10)
         spacing: Style.space(10)
 
         PanelHero {
@@ -432,12 +539,11 @@ Panel {
         }
 
         Text {
-          visible: proxy.lastError !== "" || proxy.actionStatus !== "" || !proxy.bridgeRunning
+          // A stopped bridge is expected during refresh, not evidence of a missing binary.
+          visible: proxy.lastError !== "" || proxy.actionStatus !== ""
           width: parent.width
-          text: proxy.lastError !== "" ? proxy.lastError
-            : (proxy.actionStatus !== "" ? proxy.actionStatus
-              : "Bridge binary is unavailable. Run make build in the plugin directory.")
-          color: proxy.lastError !== "" || !proxy.bridgeRunning ? root.urgent : root.dim
+          text: proxy.lastError !== "" ? proxy.lastError : proxy.actionStatus
+          color: proxy.lastError !== "" ? root.urgent : root.dim
           font.family: root.fontFamily
           font.pixelSize: Style.font.bodySmall
           wrapMode: Text.WordWrap
@@ -451,9 +557,9 @@ Panel {
           Repeater {
             model: [
               { label: "1 ROUTES", count: root.currentRoutes.length },
-              { label: "2 CONNS", count: proxy.connections.length },
+              { label: "2 CONNS", count: root.filteredConnections.length },
               { label: "3 LOGS", count: proxy.logs.length },
-              { label: "4 TAILSCALE", count: proxy.tailscalePeers.length }
+              { label: "4 TAILSCALE", count: root.filteredPeers.length }
             ]
 
             CursorSurface {
@@ -485,10 +591,35 @@ Panel {
           }
         }
 
+        TextField {
+          id: filterField
+          visible: root.filterEditing
+          width: parent.width
+          placeholderText: "Filter " + root.filterScope + "… (Enter to confirm, Esc to clear)"
+          color: root.foreground
+          font.family: root.fontFamily
+          horizontalPadding: Style.spacing.controlGap
+          verticalPadding: Style.spacing.controlPaddingY
+          text: root.filterText
+          onTextEdited: root.setFilterText(text)
+          onAccepted: root.finishFilter(false)
+          Keys.onEscapePressed: root.finishFilter(true)
+        }
+
+        Text {
+          visible: !root.filterEditing && root.filterText !== ""
+          width: parent.width
+          text: "⌕ " + root.filterScope + " · “" + root.filterText + "” · " + root.filterMatchCount + " matches · / edit"
+          color: root.dim
+          font.family: root.fontFamily
+          font.pixelSize: Style.font.bodySmall
+          elide: Text.ElideRight
+        }
+
         Flickable {
           id: contentScroll
           width: parent.width
-          height: Math.max(Style.space(120), chrome.height - y)
+          height: Math.max(0, chrome.height - y)
           contentWidth: width
           contentHeight: tabContent.implicitHeight
           clip: true
@@ -509,12 +640,16 @@ Panel {
 
               PanelSectionHeader {
                 width: parent.width
-                text: "OUTBOUND GROUP"
+                text: (root.routeGroupFocus ? "▸ GROUP" : "GROUP")
+                  + (root.filterTexts.group ? " · ⌕ " + root.filterTexts.group : "")
+                elide: Text.ElideRight
+                color: root.routeGroupFocus ? root.foreground : root.dim
                 foreground: root.foreground
                 fontFamily: root.fontFamily
               }
 
               Flow {
+                id: groupRows
                 width: parent.width
                 spacing: Style.space(5)
 
@@ -527,6 +662,7 @@ Panel {
                     width: Math.min(groupText.implicitWidth + Style.space(18), tabContent.width)
                     height: Style.space(30)
                     current: root.groupIndex === index
+                    hasCursor: root.routeGroupFocus && root.groupIndex === index
                     foreground: root.foreground
 
                     Text {
@@ -552,6 +688,16 @@ Panel {
 
               PanelSeparator { width: parent.width; foreground: root.foreground }
 
+              PanelSectionHeader {
+                width: parent.width
+                text: (root.routeGroupFocus ? "NODE" : "▸ NODE")
+                  + (root.filterTexts.node ? " · ⌕ " + root.filterTexts.node : "")
+                elide: Text.ElideRight
+                color: root.routeGroupFocus ? root.dim : root.foreground
+                foreground: root.foreground
+                fontFamily: root.fontFamily
+              }
+
               Column {
                 id: routeRows
                 width: parent.width
@@ -573,7 +719,8 @@ Panel {
               EmptyState {
                 visible: root.currentRoutes.length === 0
                 width: parent.width
-                text: proxy.connected ? "No selectable outbound groups." : "Connect to the sing-box API to load routes."
+                text: root.filterTexts.group || root.filterTexts.node ? "No matching groups or nodes."
+                  : (proxy.connected ? "No selectable outbound groups." : "Connect to the sing-box API to load routes.")
               }
             }
 
@@ -613,7 +760,7 @@ Panel {
                 spacing: Style.space(4)
 
                 Repeater {
-                  model: proxy.connections
+                  model: root.filteredConnections
 
                   ConnectionRow {
                     required property var modelData
@@ -626,9 +773,10 @@ Panel {
               }
 
               EmptyState {
-                visible: proxy.connections.length === 0
+                visible: root.filteredConnections.length === 0
                 width: parent.width
-                text: proxy.connected ? "No active connections." : "Connection stream is offline."
+                text: root.filterTexts.connections ? "No matching connections."
+                  : (proxy.connected ? "No active connections." : "Connection stream is offline.")
               }
             }
 
@@ -739,7 +887,7 @@ Panel {
                   PanelSectionHeader {
                     anchors.left: parent.left
                     anchors.verticalCenter: parent.verticalCenter
-                    text: "RECEIVED FILES · " + proxy.taildropInbox.length
+                    text: "RECEIVED FILES · " + root.filteredInbox.length
                     foreground: root.foreground
                     fontFamily: root.fontFamily
                   }
@@ -762,7 +910,7 @@ Panel {
                   spacing: Style.space(4)
 
                   Repeater {
-                    model: proxy.taildropInbox
+                    model: root.filteredInbox
 
                     CursorSurface {
                       required property var modelData
@@ -795,6 +943,7 @@ Panel {
 
                         PanelActionButton {
                           id: saveFileButton
+                          anchors.verticalCenter: parent.verticalCenter
                           iconText: "󰇚"
                           tooltipText: "Save to ~/Downloads"
                           foreground: root.foreground
@@ -804,6 +953,7 @@ Panel {
                         }
                         PanelActionButton {
                           id: discardFileButton
+                          anchors.verticalCenter: parent.verticalCenter
                           iconText: "󰩹"
                           tooltipText: "Discard without saving"
                           foreground: root.foreground
@@ -819,17 +969,31 @@ Panel {
               }
 
               Repeater {
-                model: proxy.tailscalePeers
+                id: peerRepeater
+                model: root.filteredPeers
 
                 CursorSurface {
                   id: peerRow
                   required property var modelData
+                  required property int index
                   readonly property bool pickTarget: proxy.taildropPickMode && proxy.taildropEligible(modelData)
                   width: tabContent.width
                   implicitHeight: Style.space(52)
                   current: modelData.exitNode === true || pickTarget
+                  hasCursor: root.activeTab === 3 && root.peerIndex === index
                   opacity: proxy.taildropPickMode && !pickTarget ? 0.4 : 1
                   foreground: root.foreground
+
+                  // Observe the whole row, including its action buttons, without
+                  // intercepting clicks or losing keyboard selection on exit.
+                  HoverHandler {
+                    onHoveredChanged: if (hovered) root.peerIndex = peerRow.index
+                  }
+
+                  MouseArea {
+                    anchors.fill: parent
+                    onClicked: root.peerIndex = peerRow.index
+                  }
 
                   Row {
                     anchors.fill: parent
@@ -847,25 +1011,28 @@ Panel {
                     }
                     PanelActionButton {
                       id: sendButton
+                      anchors.verticalCenter: parent.verticalCenter
                       iconText: "󰒊"
-                      tooltipText: "Send files with Taildrop"
+                      tooltipText: "Send files with Taildrop (s)"
                       foreground: root.foreground
                       fontFamily: root.fontFamily
                       visible: proxy.tailscaleCanShareFiles && modelData.canReceiveFiles === true
                       enabled: modelData.online === true && !proxy.busy
-                      onClicked: proxy.chooseTaildropFiles(modelData)
+                      onClicked: root.sendPeerFiles(modelData)
                     }
                     PanelActionButton {
                       id: copyButton
+                      anchors.verticalCenter: parent.verticalCenter
                       iconText: "󰆏"
-                      tooltipText: "Copy Tailscale IP"
+                      tooltipText: "Copy Tailscale IP (c)"
                       foreground: root.foreground
                       fontFamily: root.fontFamily
                       enabled: (modelData.tailscaleIPs || []).length > 0
-                      onClicked: Quickshell.execDetached(["wl-copy", String(modelData.tailscaleIPs[0])])
+                      onClicked: root.copyPeerIP(modelData)
                     }
                     PanelActionButton {
                       id: exitButton
+                      anchors.verticalCenter: parent.verticalCenter
                       iconText: "󰒍"
                       tooltipText: "Use as exit node"
                       foreground: root.foreground
@@ -883,15 +1050,18 @@ Panel {
                     enabled: proxy.taildropPickMode
                     hoverEnabled: true
                     cursorShape: peerRow.pickTarget ? Qt.PointingHandCursor : Qt.ForbiddenCursor
-                    onClicked: proxy.sendTaildropTo(peerRow.modelData)
+                    onClicked: {
+                      root.peerIndex = peerRow.index
+                      proxy.sendTaildropTo(peerRow.modelData)
+                    }
                   }
                 }
               }
 
               EmptyState {
-                visible: proxy.tailscalePeers.length === 0
+                visible: root.filteredPeers.length === 0 && root.filteredInbox.length === 0
                 width: parent.width
-                text: proxy.tailscaleEndpoint === ""
+                text: root.filterTexts.tailscale ? "No matching peers or received files." : proxy.tailscaleEndpoint === ""
                   ? "Tailscale is not connected."
                   : "No Tailscale peers available."
               }
@@ -926,36 +1096,6 @@ Panel {
                 }
               }
 
-              TextField {
-                id: logFilterField
-                visible: root.logFilterEditing
-                width: parent.width
-                placeholderText: "Filter logs… (Enter to confirm, Esc to cancel)"
-                foreground: root.foreground
-                font.family: root.fontFamily
-                horizontalPadding: Style.spacing.controlGap
-                verticalPadding: Style.spacing.controlPaddingY
-                text: root.logFilterEditing ? root.logFilterText : ""
-
-                onTextChanged: if (root.logFilterEditing && text !== root.logFilterText) root.logFilterText = text
-                onAccepted: root.logFilterEditing = false
-                Keys.onEscapePressed: { text = ""; root.logFilterText = ""; root.logFilterEditing = false }
-
-                onVisibleChanged: if (visible) Qt.callLater(forceActiveFocus)
-              }
-
-              Text {
-                id: logFilterChip
-                visible: !root.logFilterEditing && root.logFilterText !== ""
-                width: parent.width
-                text: "⌕ “" + root.logFilterText + "” · " + root.filteredLogs.length
-                  + (root.filteredLogs.length === 1 ? " match" : " matches")
-                color: root.dim
-                font.family: root.fontFamily
-                font.pixelSize: Style.font.bodySmall
-                elide: Text.ElideRight
-              }
-
               Repeater {
                 model: root.filteredLogs
 
@@ -971,8 +1111,52 @@ Panel {
                 width: parent.width
                 text: !proxy.connected ? "Log stream is offline."
                   : (proxy.logs.length === 0 ? "Waiting for log messages…"
-                    : "No log lines match “" + root.logFilterText + "”.")
+                    : "No log lines match “" + root.filterTexts.logs + "”.")
               }
+            }
+          }
+        }
+      }
+
+      Column {
+        id: shortcutFooter
+        anchors.left: parent.left
+        anchors.right: parent.right
+        anchors.bottom: parent.bottom
+        spacing: Style.space(6)
+
+        PanelSeparator { width: parent.width; foreground: root.foreground }
+
+        Text {
+          visible: root.shortcutHelpOpen && !root.filterEditing
+          width: parent.width
+          text: "KEYBOARD SHORTCUTS · ? / Esc dismiss\n"
+            + "1–4 tabs · h/l previous/next tab · r reconnect\n"
+            + "m cycle mode · t open TUI · Esc close panel\n"
+            + "Routes: Tab/Shift+Tab groups ↔ nodes · j/k move\n"
+            + "Group: Enter nodes · Node: Enter select · u test\n"
+            + "Connections: j/k move · x/d/Enter close · D close all\n"
+            + "Logs: c clear · Tailscale: j/k move · s send · c copy IP\n"
+            + "/ filter · Enter confirm · Esc clear / exit editing\n"
+            + "↑/↓ also move · Tab outside Routes switches panels"
+          color: root.dim
+          font.family: root.fontFamily
+          font.pixelSize: Style.font.caption
+          wrapMode: Text.WordWrap
+        }
+
+        Flow {
+          width: parent.width
+          spacing: Style.space(12)
+          Repeater {
+            model: root.shortcutHints
+            Text {
+              required property var modelData
+              text: modelData.text
+              color: modelData.available ? root.dim : root.faint
+              opacity: modelData.available ? 1 : 0.55
+              font.family: root.fontFamily
+              font.pixelSize: Style.font.caption
             }
           }
         }
@@ -1095,7 +1279,7 @@ Panel {
     readonly property int delay: Number(route ? route.TestDelay : 0)
     readonly property color delayTone: delay <= 0 ? root.faint : (delay < 150 ? root.accent : (delay < 500 ? root.foreground : root.urgent))
 
-    hasCursor: root.cursorActive && root.activeTab === 0 && root.routeIndex === rowIndex
+    hasCursor: !root.routeGroupFocus && root.activeTab === 0 && root.routeIndex === rowIndex
     current: selected
     foreground: root.foreground
     implicitHeight: Style.space(46)
@@ -1104,8 +1288,13 @@ Panel {
       anchors.fill: parent
       hoverEnabled: true
       cursorShape: Qt.PointingHandCursor
-      onEntered: { root.cursorActive = true; root.routeIndex = routeRow.rowIndex }
-      onClicked: if (root.currentGroup && routeRow.route) proxy.selectOutbound(root.currentGroup.Tag, routeRow.route.Tag)
+      onEntered: if (!root.routeGroupFocus) { root.cursorActive = true; root.routeIndex = routeRow.rowIndex }
+      onClicked: {
+        root.routeGroupFocus = false
+        root.cursorActive = true
+        root.routeIndex = routeRow.rowIndex
+        if (root.currentGroup && routeRow.route) proxy.selectOutbound(root.currentGroup.Tag, routeRow.route.Tag)
+      }
     }
 
     Row {
@@ -1245,7 +1434,7 @@ Panel {
       PanelActionButton {
         id: closeButton
         iconText: "󰅖"
-        tooltipText: "Close connection (d)"
+        tooltipText: "Close connection (x / d)"
         foreground: root.foreground
         hoverColor: root.urgent
         fontFamily: root.fontFamily
