@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "io.github.d3vw.sinbar",
   "name": "Sinbar",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "author": "d3vw",
   "license": "MIT",
   "description": "A keyboard-first sing-box monitor with outbound and Tailscale controls for the Omarchy bar.",
