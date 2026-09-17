@@ -384,6 +384,11 @@ func runAction(api *client.Client, args []string) (any, error) {
 			return nil, err
 		}
 		return nil, api.TailscaleLogout(ctx, args[1])
+	case "taildrop-mark-read":
+		if err := require(2, "taildrop-mark-read <endpoint>"); err != nil {
+			return nil, err
+		}
+		return nil, api.MarkTaildropInboxRead(ctx, args[1])
 	case "clear-logs":
 		if err := require(1, "clear-logs"); err != nil {
 			return nil, err

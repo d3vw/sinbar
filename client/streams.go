@@ -292,7 +292,8 @@ func translateTailscale(endpoint *daemon.TailscaleEndpointStatus) TailscaleStatu
 		EndpointTag: endpoint.EndpointTag, BackendState: endpoint.BackendState,
 		AuthURL: endpoint.AuthURL, NetworkName: endpoint.NetworkName,
 		MagicDNS: endpoint.MagicDNSSuffix, KeyAuth: endpoint.KeyAuth, CanShareFiles: endpoint.CanShareFiles,
-		Peers: make([]TailscalePeer, 0),
+		WaitingFileCount: endpoint.WaitingFileCount, ReceivingFileCount: endpoint.ReceivingFileCount,
+		UnreadFileCount: endpoint.UnreadFileCount, Peers: make([]TailscalePeer, 0),
 	}
 	toPeer := func(peer *daemon.TailscalePeer, userID int64, login string) *TailscalePeer {
 		if peer == nil {

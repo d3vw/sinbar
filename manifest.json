@@ -19,7 +19,9 @@
     "defaults": {
       "configPath": "~/.config/sinbar/config.toml",
       "showSpeeds": "On",
-      "tuiCommand": ""
+      "nodeLayout": "List",
+      "tuiCommand": "",
+      "sshUsername": "root"
     },
     "schema": [
       {
@@ -35,6 +37,21 @@
         "label": "Show live speeds in bar",
         "options": ["On", "Off"],
         "defaultValue": "On"
+      },
+      {
+        "key": "nodeLayout",
+        "type": "enum",
+        "label": "Node layout",
+        "options": ["List", "Grid"],
+        "defaultValue": "List",
+        "description": "Display nodes as a list or a compact three-column grid."
+      },
+      {
+        "key": "sshUsername",
+        "type": "string",
+        "label": "Tailscale SSH username",
+        "defaultValue": "root",
+        "description": "Username on the remote device. Root is common for servers; change it when the remote account differs."
       },
       {
         "key": "tuiCommand",

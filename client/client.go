@@ -380,6 +380,14 @@ func (c *Client) TailscaleLogout(ctx context.Context, endpointTag string) error 
 	return nil
 }
 
+func (c *Client) MarkTaildropInboxRead(ctx context.Context, endpointTag string) error {
+	_, err := c.svc.MarkTaildropInboxRead(ctx, &daemon.MarkTaildropInboxReadRequest{EndpointTag: endpointTag})
+	if err != nil {
+		return fmt.Errorf("mark taildrop inbox read: %w", err)
+	}
+	return nil
+}
+
 func (c *Client) ClearLogs(ctx context.Context) error {
 	_, err := c.svc.ClearLogs(ctx, &emptypb.Empty{})
 	if err != nil {

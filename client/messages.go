@@ -175,14 +175,17 @@ type TaildropInboxUpdate struct {
 }
 
 type TailscaleStatusUpdate struct {
-	EndpointTag   string          `json:"endpointTag"`
-	BackendState  string          `json:"backendState"`
-	AuthURL       string          `json:"authUrl,omitempty"`
-	NetworkName   string          `json:"networkName,omitempty"`
-	MagicDNS      string          `json:"magicDNSSuffix,omitempty"`
-	KeyAuth       bool            `json:"keyAuth"`
-	CanShareFiles bool            `json:"canShareFiles"`
-	Self          *TailscalePeer  `json:"self,omitempty"`
-	Peers         []TailscalePeer `json:"peers"`
-	ExitNode      *TailscalePeer  `json:"exitNode,omitempty"`
+	EndpointTag        string          `json:"endpointTag"`
+	BackendState       string          `json:"backendState"`
+	AuthURL            string          `json:"authUrl,omitempty"`
+	NetworkName        string          `json:"networkName,omitempty"`
+	MagicDNS           string          `json:"magicDNSSuffix,omitempty"`
+	KeyAuth            bool            `json:"keyAuth"`
+	CanShareFiles      bool            `json:"canShareFiles"`
+	WaitingFileCount   int32           `json:"waitingFileCount"`
+	ReceivingFileCount int32           `json:"receivingFileCount"`
+	UnreadFileCount    int32           `json:"unreadFileCount"`
+	Self               *TailscalePeer  `json:"self,omitempty"`
+	Peers              []TailscalePeer `json:"peers"`
+	ExitNode           *TailscalePeer  `json:"exitNode,omitempty"`
 }

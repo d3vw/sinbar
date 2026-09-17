@@ -15,6 +15,7 @@ Panel {
   property int activeTab: 0
   property int groupIndex: 0
   property int routeIndex: 0
+  readonly property bool routeGrid: String(setting("nodeLayout", "List")) === "Grid"
   property bool routeGroupFocus: true
   property int connectionIndex: 0
   property int peerIndex: 0
@@ -30,7 +31,7 @@ Panel {
     if (filterEditing) return [{ text: "Enter confirm", available: true }, { text: "Esc clear / exit", available: true }]
     var hints = []
     if (activeTab === 0) {
-      hints.push({ text: "j/k move", available: routeGroupFocus ? selectableGroups.length > 0 : currentRoutes.length > 0 })
+      hints.push({ text: routeGrid && !routeGroupFocus ? "h/j/k/l move" : "j/k move", available: routeGroupFocus ? selectableGroups.length > 0 : currentRoutes.length > 0 })
       hints.push({ text: routeGroupFocus ? "Tab nodes" : "Tab groups", available: true })
       hints.push({ text: routeGroupFocus ? "Enter nodes" : "Enter select", available: routeGroupFocus ? !!currentGroup : !!selectedRoute && !proxy.busy })
       if (!routeGroupFocus) hints.push({ text: "u test", available: !!selectedRoute && !proxy.busy })
@@ -45,6 +46,7 @@ Panel {
       hints.push({ text: "s send files", available: !!selectedPeer && selectedPeer.online === true
         && selectedPeer.canReceiveFiles === true && proxy.tailscaleCanShareFiles && !proxy.busy })
       hints.push({ text: "c copy IP", available: !!selectedPeer && (selectedPeer.tailscaleIPs || []).length > 0 })
+      hints.push({ text: "a SSH", available: sshEligible(selectedPeer) })
     }
     hints.push({ text: "/ filter", available: true })
     hints.push({ text: "? help", available: true })
@@ -65,6 +67,7 @@ Panel {
   readonly property string fontFamily: bar ? bar.fontFamily : Style.font.family
   readonly property bool showSpeeds: String(setting("showSpeeds", "On")) === "On"
   readonly property string tuiCommand: String(setting("tuiCommand", ""))
+  readonly property string sshUsername: String(setting("sshUsername", "")) || "root"
   readonly property var selectableGroups: proxy && proxy.groups ? filteredGroups() : []
   readonly property var filteredLogs: filterItems(proxy.logs, filterTexts.logs, ["Message"])
   readonly property var filteredConnections: filterItems(proxy.connections, filterTexts.connections,
@@ -78,6 +81,8 @@ Panel {
   readonly property var currentGroup: arrayLength(selectableGroups) > 0
     ? selectableGroups[Math.max(0, Math.min(groupIndex, arrayLength(selectableGroups) - 1))]
     : null
+  // Stream updates replace group objects even when the selected group is unchanged.
+  readonly property string currentGroupTag: currentGroup ? String(currentGroup.Tag || "") : ""
   readonly property var currentRoutes: filterItems(currentGroup ? currentGroup.Items : [], filterTexts.node, ["Tag", "Type"])
   readonly property var selectedRoute: arrayLength(currentRoutes) > 0
     ? currentRoutes[Math.max(0, Math.min(routeIndex, arrayLength(currentRoutes) - 1))]
@@ -176,6 +181,11 @@ Panel {
 
   function moveCursor(dx, dy) {
     cursorActive = true
+    if (activeTab === 0 && !routeGroupFocus && routeGrid) {
+      routeIndex = Math.max(0, Math.min(currentRoutes.length - 1, routeIndex + dx + dy * routeRows.columns))
+      scrollCursorIntoView()
+      return
+    }
     if (dx !== 0) {
       switchTab(activeTab + dx)
       return
@@ -198,6 +208,8 @@ Panel {
       proxy.selectOutbound(currentGroup.Tag, selectedRoute.Tag)
     else if (activeTab === 1 && selectedConnection)
       proxy.closeConnection(selectedConnection.ID)
+    else if (activeTab === 3 && sshEligible(selectedPeer))
+      openSSH(selectedPeer)
   }
 
   function cycleMode() {
@@ -216,6 +228,7 @@ Panel {
       var column = activeTab === 0 ? (routeGroupFocus ? groupRows : routeRows) : (activeTab === 1 ? connectionRows : null)
       var index = activeTab === 0 ? (routeGroupFocus ? groupIndex : routeIndex) : connectionIndex
       var item = activeTab === 3 ? peerRepeater.itemAt(peerIndex)
+        : (activeTab === 0 && !routeGroupFocus) ? routeRepeater.itemAt(routeIndex)
         : (column && index >= 0 && index < column.children.length ? column.children[index] : null)
       if (!item) return
       var point = item.mapToItem(contentScroll.contentItem, 0, 0)
@@ -242,6 +255,18 @@ Panel {
       Quickshell.execDetached(["wl-copy", String(peer.tailscaleIPs[0])])
   }
 
+  function sshEligible(peer) {
+    return !!peer && peer.online === true && (peer.tailscaleIPs || []).length > 0
+      && String(peer.os || "").toLowerCase() === "linux"
+  }
+
+  function openSSH(peer) {
+    if (!sshEligible(peer)) return
+    var destination = sshUsername + "@" + String(peer.tailscaleIPs[0])
+    close()
+    Quickshell.execDetached(["omarchy", "launch", "terminal", "ssh", destination])
+  }
+
   function handleTextKey(text) {
     if (text === "?") shortcutHelpOpen = !shortcutHelpOpen
     else if (text === "1") switchTab(0)
@@ -261,6 +286,8 @@ Panel {
       sendPeerFiles(selectedPeer)
     } else if (text === "c" && activeTab === 3) {
       copyPeerIP(selectedPeer)
+    } else if ((text === "a" || text === "A") && activeTab === 3) {
+      openSSH(selectedPeer)
     } else if (text === "/") {
       filterEditing = true
       filterField.forceActiveFocus()
@@ -291,6 +318,7 @@ Panel {
     if (opened) {
       cursorActive = false
       clampCursors()
+      if (activeTab === 3) proxy.markTaildropRead()
       Qt.callLater(function() { keyCatcher.forceActiveFocus() })
     } else {
       filterEditing = false
@@ -300,12 +328,13 @@ Panel {
   }
   onSelectableGroupsChanged: clampCursors()
   onCurrentRoutesChanged: clampCursors()
-  onCurrentGroupChanged: routeIndex = 0
+  onCurrentGroupTagChanged: routeIndex = 0
   onFilteredConnectionsChanged: clampCursors()
   onFilteredPeersChanged: clampCursors()
   onFilterScopeChanged: if (filterEditing) finishFilter(false)
   onActiveTabChanged: {
     if (activeTab !== 3) proxy.cancelTaildropDrop()
+    else if (opened) proxy.markTaildropRead()
   }
 
   Service {
@@ -351,6 +380,26 @@ Panel {
       horizontalAlignment: Text.AlignHCenter
       verticalAlignment: Text.AlignVCenter
       opacity: proxy.connected ? 1.0 : 0.45
+    }
+
+    Rectangle {
+      visible: proxy.taildropUnreadCount > 0
+      anchors.top: parent.top
+      anchors.left: parent.left
+      anchors.leftMargin: Style.bar.iconSlot - Style.space(9)
+      width: Style.space(12)
+      height: width
+      radius: width / 2
+      color: root.urgent
+
+      Text {
+        anchors.centerIn: parent
+        text: proxy.taildropUnreadCount > 9 ? "9+" : String(proxy.taildropUnreadCount)
+        color: root.barText
+        font.family: root.fontFamily
+        font.pixelSize: Style.fontPx(0.48)
+        font.bold: true
+      }
     }
 
     onPressed: function(buttonCode) {
@@ -698,18 +747,20 @@ Panel {
                 fontFamily: root.fontFamily
               }
 
-              Column {
+              Grid {
                 id: routeRows
                 width: parent.width
-                spacing: Style.space(4)
+                columns: root.routeGrid ? 3 : 1
+                spacing: Style.space(root.routeGrid ? 8 : 4)
 
                 Repeater {
+                  id: routeRepeater
                   model: root.currentRoutes
 
                   RouteRow {
                     required property var modelData
                     required property int index
-                    width: routeRows.width
+                    width: (routeRows.width - routeRows.spacing * (routeRows.columns - 1)) / routeRows.columns
                     route: modelData
                     rowIndex: index
                   }
@@ -1003,6 +1054,7 @@ Panel {
                     Column {
                       width: parent.width
                         - (sendButton.visible ? sendButton.width + parent.spacing : 0)
+                        - (sshButton.visible ? sshButton.width + parent.spacing : 0)
                         - (copyButton.visible ? copyButton.width + parent.spacing : 0)
                         - (exitButton.visible ? exitButton.width + parent.spacing : 0)
                       anchors.verticalCenter: parent.verticalCenter
@@ -1019,6 +1071,17 @@ Panel {
                       visible: proxy.tailscaleCanShareFiles && modelData.canReceiveFiles === true
                       enabled: modelData.online === true && !proxy.busy
                       onClicked: root.sendPeerFiles(modelData)
+                    }
+                    PanelActionButton {
+                      id: sshButton
+                      anchors.verticalCenter: parent.verticalCenter
+                      iconText: "󰌆"
+                      tooltipText: "Open system SSH over Tailscale IP (a)"
+                      foreground: root.foreground
+                      fontFamily: root.fontFamily
+                      visible: String(modelData.os || "").toLowerCase() === "linux"
+                      enabled: root.sshEligible(modelData)
+                      onClicked: root.openSSH(modelData)
                     }
                     PanelActionButton {
                       id: copyButton
@@ -1135,6 +1198,7 @@ Panel {
             + "m cycle mode · t open TUI · Esc close panel\n"
             + "Routes: Tab/Shift+Tab groups ↔ nodes · j/k move\n"
             + "Group: Enter nodes · Node: Enter select · u test\n"
+            + "Node Grid: h/l columns · j/k rows\n"
             + "Connections: j/k move · x/d/Enter close · D close all\n"
             + "Logs: c clear · Tailscale: j/k move · s send · c copy IP\n"
             + "/ filter · Enter confirm · Esc clear / exit editing\n"
@@ -1282,13 +1346,18 @@ Panel {
     hasCursor: !root.routeGroupFocus && root.activeTab === 0 && root.routeIndex === rowIndex
     current: selected
     foreground: root.foreground
-    implicitHeight: Style.space(46)
+    implicitHeight: root.routeGrid ? gridContent.implicitHeight + Style.space(20) : Style.space(46)
 
     MouseArea {
       anchors.fill: parent
       hoverEnabled: true
       cursorShape: Qt.PointingHandCursor
-      onEntered: if (!root.routeGroupFocus) { root.cursorActive = true; root.routeIndex = routeRow.rowIndex }
+      // Recreated delegates can receive entered with a stationary pointer after
+      // a latency update. Only actual pointer movement may move the cursor.
+      onPositionChanged: if (containsMouse && !root.routeGroupFocus) {
+        root.cursorActive = true
+        root.routeIndex = routeRow.rowIndex
+      }
       onClicked: {
         root.routeGroupFocus = false
         root.cursorActive = true
@@ -1297,7 +1366,58 @@ Panel {
       }
     }
 
+    Column {
+      id: gridContent
+      visible: root.routeGrid
+      anchors.left: parent.left
+      anchors.right: parent.right
+      anchors.top: parent.top
+      anchors.margins: Style.space(10)
+      spacing: Style.space(4)
+
+      Text {
+        width: parent.width
+        text: (routeRow.selected ? "● " : "○ ") + (routeRow.route ? String(routeRow.route.Tag || "Unnamed route") : "Unnamed route")
+        color: routeRow.selected ? root.accent : root.foreground
+        font.family: root.fontFamily
+        font.pixelSize: Style.font.bodySmall
+        font.bold: routeRow.selected
+        elide: Text.ElideRight
+      }
+      Text {
+        width: parent.width
+        text: routeRow.route ? String(routeRow.route.Type || "outbound") : "outbound"
+        color: root.dim
+        font.family: root.fontFamily
+        font.pixelSize: Style.font.caption
+        elide: Text.ElideRight
+      }
+      Item {
+        width: parent.width
+        height: gridTestButton.implicitHeight
+        Text {
+          anchors.left: parent.left
+          anchors.verticalCenter: parent.verticalCenter
+          text: Model.routeDelay(routeRow.delay)
+          color: routeRow.delayTone
+          font.family: root.fontFamily
+          font.pixelSize: Style.font.bodySmall
+        }
+        PanelActionButton {
+          id: gridTestButton
+          anchors.right: parent.right
+          iconText: "󰓅"
+          tooltipText: "Test latency (u)"
+          foreground: root.foreground
+          fontFamily: root.fontFamily
+          enabled: !proxy.busy
+          onClicked: if (routeRow.route) proxy.urlTest(routeRow.route.Tag)
+        }
+      }
+    }
+
     Row {
+      visible: !root.routeGrid
       anchors.left: parent.left
       anchors.right: parent.right
       anchors.verticalCenter: parent.verticalCenter

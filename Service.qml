@@ -38,6 +38,11 @@ Item {
   property var tailscalePeers: []
   property var tailscaleExitNode: null
   property bool tailscaleCanShareFiles: false
+  property int taildropWaitingCount: 0
+  property int taildropReceivingCount: 0
+  property int taildropUnreadCount: 0
+  property bool _taildropCountInitialized: false
+  property bool _taildropReadPending: false
   // Files other devices have sent here, still waiting in sing-box's staging
   // area. Only streamed while the panel is open.
   property var taildropInbox: []
@@ -152,6 +157,13 @@ Item {
   }
 
   function applyTailscale(data) {
+    var nextUnread = Number(data.unreadFileCount || 0)
+    if (_taildropCountInitialized && !_taildropReadPending && nextUnread > taildropUnreadCount) {
+      var added = nextUnread - taildropUnreadCount
+      Quickshell.execDetached(["notify-send", "--app-name=Sinbar", "--icon=document-send",
+                              "Tailscale file received",
+                              added === 1 ? "A new Taildrop file is ready." : added + " new Taildrop files are ready."])
+    }
     tailscaleEndpoint = String(data.endpointTag || "")
     tailscaleState = String(data.backendState || "Unavailable")
     tailscaleAuthUrl = String(data.authUrl || "")
@@ -160,6 +172,11 @@ Item {
     tailscalePeers = data.peers || []
     tailscaleExitNode = data.exitNode || null
     tailscaleCanShareFiles = data.canShareFiles === true
+    taildropWaitingCount = Number(data.waitingFileCount || 0)
+    taildropReceivingCount = Number(data.receivingFileCount || 0)
+    taildropUnreadCount = nextUnread
+    if (nextUnread === 0) _taildropReadPending = false
+    _taildropCountInitialized = true
   }
 
   function applyConnections(data) {
@@ -328,6 +345,13 @@ Item {
     if (tailscaleEndpoint !== "") runAction(["tailscale-exit-clear", tailscaleEndpoint], "Clearing exit node…", "Exit node cleared")
   }
 
+  function markTaildropRead() {
+    if (tailscaleEndpoint === "" || taildropUnreadCount === 0 || markReadProcess.running) return
+    _taildropReadPending = true
+    markReadProcess.command = bridgeCommand(["taildrop-mark-read", tailscaleEndpoint])
+    markReadProcess.running = true
+  }
+
   function tailscaleLogout() {
     if (tailscaleEndpoint !== "") runAction(["tailscale-logout", tailscaleEndpoint], "Logging out…", "Tailscale logged out")
   }
@@ -389,6 +413,12 @@ Item {
       root.runAction(["taildrop-send", root.tailscaleEndpoint, peerID].concat(files),
                      "Sending " + files.length + " file(s)…", "Sent to " + peerName)
     }
+  }
+
+  Process {
+    id: markReadProcess
+    command: []
+    running: false
   }
 
   Process {

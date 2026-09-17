@@ -24,8 +24,8 @@ A keyboard-first plugin for the **Omarchy Quattro** shell.
 | **Routes** | Browse outbound groups, switch nodes, test latency, and change Clash mode. |
 | **Connections** | Find connections by domain, address, process, or route; close one or all. |
 | **Logs** | Follow messages in sing-box's own colors, filter by keyword, and clear logs. |
-| **Tailscale** | Browse peers, copy IPs, select or clear an Exit Node, and open the authentication link when needed. |
-| **Taildrop** | Send files, drop them onto the bar, and preview, save, or discard received files. |
+| **Tailscale** | Browse peers, copy IPs, open system SSH over a peer's Tailscale IP, select or clear an Exit Node, and authenticate. |
+| **Taildrop** | Send files, drop them onto the bar, preview/save/discard received files, and get unread badges and desktop notifications. |
 
 Navigate with `j` / `k`, filter with `/`, and press `?` for help. A fixed footer shows
 shortcuts for the current tab and focus, with unavailable actions dimmed.
@@ -56,7 +56,8 @@ gRPC API. Tailscale controls use that same API; a separate `tailscaled` service 
 | Choosing files to send | `omarchy-file-select`, session D-Bus, and a working desktop file-chooser portal; the Omarchy helper uses Python 3 and PyGObject/Gio |
 | Opening received files | `xdg-open` and an associated desktop application |
 | Tailscale authentication | `omarchy-launch-browser` and a configured browser |
-| Optional terminal TUI | `omarchy launch terminal`, Bash, and your configured command |
+| System terminal and SSH | `omarchy launch terminal` and OpenSSH; used for peer SSH and the optional right-click TUI |
+| Desktop notifications | `notify-send` |
 
 Sinbar connects to an existing sing-box service; it does not install, configure, or start
 that service. Enable its StartedService API before use. Tailscale features additionally
@@ -153,6 +154,7 @@ omarchy bar move io.github.d3vw.sinbar --section right
 | --- | --- | --- |
 | **Config path** | `~/.config/sinbar/config.toml` | Use a different connection configuration |
 | **Show live speeds in bar** | `On` | Show or hide the bar's download readout |
+| **Tailscale SSH username** | `root` | Username on the remote device; change it when the remote account differs |
 | **TUI command** | Empty | Command to open in a terminal on right click; empty disables it |
 
 ## Controls
@@ -182,8 +184,22 @@ omarchy bar move io.github.d3vw.sinbar --section right
 | **Connections** | `x` / `X`, `d`, or `Enter` | Close the selected visible connection |
 | | `D` | Close **all** connections, including filtered-out rows |
 | **Logs** | `c` | Clear logs |
-| **Tailscale** | `s` | Choose files to send to the selected peer |
+| **Tailscale** | `Enter` or `a` | Open Tailscale SSH for the selected supported peer in the system terminal |
+| | `s` | Choose files to send to the selected peer |
 | | `c` | Copy the selected peer's first Tailscale IP |
+
+Set `nodeLayout` to `"List"` (default) or `"Grid"` in the Sinbar widget entry in
+`~/.config/omarchy/shell.json`. You can also use the widget's **Node layout** setting.
+Grid displays three equal-width cards per row, with node name, type, latency,
+active selection, and a latency-test button. There is no layout toggle in the panel.
+
+```json
+{ "id": "io.github.d3vw.sinbar", "nodeLayout": "Grid" }
+```
+
+While nodes are focused in Grid mode, `h` / `l` (or Left / Right) move between
+cards and `j` / `k` (or Down / Up) move by a grid row. `Enter` selects the node
+and `u` tests latency as before.
 
 Routes starts with Group focused. A `▸` heading and row highlight show where `j` / `k`
 will move. Browsing groups previews their nodes; selecting an outbound requires Enter
@@ -191,7 +207,14 @@ in Node or clicking a node. Outside Routes, Tab switches shell panels.
 
 Tailscale highlights the current peer on hover, click, or keyboard navigation and keeps
 the highlight when the pointer leaves. Sending requires an online peer that can receive
-files. Opening the file chooser closes the panel first to release keyboard focus.
+files. SSH opens the system `ssh` client against the online Linux peer's Tailscale IP, using your
+existing SSH keys and configuration; it does not require the Tailscale SSH service. Opening either
+the terminal or file chooser closes the panel first to release
+keyboard focus.
+
+A badge on the bar shows unread Taildrop files. New arrivals produce a desktop notification;
+opening the Tailscale tab marks the inbox as read. Existing unread files do not trigger another
+notification merely because Sinbar or the shell restarted.
 
 ### Search
 
