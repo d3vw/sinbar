@@ -30,8 +30,10 @@ Sinbar is an Omarchy Quattro bar plugin that monitors and controls sing-box thro
 - `omarchy plugin add` only git-clones the repo; it never runs a build step. `bridgeCommand()`
   in Service.qml runs `scripts/ensure-bridge.sh`, which on first run (and after `omarchy plugin
   update` changes `manifest.json`'s version) downloads the prebuilt bridge for the arch from the
-  matching GitHub Release, verifies its SHA-256, falls back to `go build` when Go is present, and
-  otherwise errors. `bin/.version` stamps which manifest version the staged binary was built for.
+  matching GitHub Release, verifies its SHA-256, and falls back to `go build` when Go is present.
+  Downloaded and fallback-built bridges must be staged under `$XDG_CACHE_HOME/sinbar/bridges/`,
+  never the watched plugin directory. `bin/.version` stamps a bridge installed by
+  `make install-local`.
 - Keep the release workflow (`.github/workflows/release.yml`) able to produce
   `sinbar-bridge-linux-<amd64|arm64>` plus `.sha256` assets: bump `manifest.json`'s version, then
   push a matching `vX.Y.Z` tag. The tag/version check in that workflow is intentional.

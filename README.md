@@ -84,9 +84,12 @@ On first launch, `scripts/ensure-bridge.sh`:
 2. Verifies its SHA-256 checksum before installing it.
 3. Falls back to building from source if the download is unavailable and Go is installed.
 
-The bridge is cached in `bin/sinbar-bridge`, with its version recorded in `bin/.version`.
-When a plugin update changes the manifest version, the next launch prepares the matching
-bridge. If an update cannot be downloaded or built, an existing binary is kept with a warning.
+Downloaded bridges are cached under `$XDG_CACHE_HOME/sinbar/bridges/` (by default
+`~/.cache/sinbar/bridges/`), outside the watched plugin directory. This prevents shell reloads
+while a bridge is downloading. A local installation may instead use
+`bin/sinbar-bridge`, with its version recorded in `bin/.version`. When a plugin update changes
+the manifest version, the next launch prepares the matching bridge. If an update cannot be
+downloaded or built, an existing local binary is kept with a warning.
 
 </details>
 
@@ -325,7 +328,9 @@ checks that the tag matches the manifest version, then produces Linux `amd64` an
 bridges with `.sha256` files and build-provenance attestations.
 
 Local installation replaces the bridge atomically and writes `bin/.version` so the
-bootstrap script recognizes the locally built binary.
+bootstrap script recognizes the locally built binary. Downloaded and fallback-built bridges are
+instead staged atomically in `$XDG_CACHE_HOME/sinbar/bridges/`, avoiding plugin-directory file
+changes that would trigger a Quickshell reload.
 
 </details>
 
@@ -340,7 +345,8 @@ shell and starts bridge/helper processes, not a second Quickshell instance.
 | Location | Use |
 | --- | --- |
 | `~/.config/sinbar/config.toml` | Read connection settings and the API secret |
-| `~/.config/omarchy/plugins/io.github.d3vw.sinbar/` | Installed plugin, cached bridge, and version stamp |
+| `~/.config/omarchy/plugins/io.github.d3vw.sinbar/` | Installed plugin; a local source installation may also place its bridge and version stamp here |
+| `$XDG_CACHE_HOME/sinbar/bridges/` (default `~/.cache/sinbar/bridges/`) | Downloaded or fallback-built bridge binaries |
 | Files chosen for sending | Read and send through sing-box Taildrop |
 | `~/Downloads/` | Save received files |
 | `$XDG_CACHE_HOME/sinbar/taildrop/` (default `~/.cache/sinbar/taildrop/`) | Stage received files for preview |
